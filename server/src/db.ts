@@ -27,6 +27,18 @@ export const pool = new Pool({
   max: Number.isFinite(poolMax) && poolMax > 0 ? poolMax : 10,
 });
 
+function resolveSchemaSqlPath(): string {
+  const fromModule = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "db", "schema.sql");
+  const fromRepoRoot = path.join(process.cwd(), "server", "db", "schema.sql");
+  const candidates = [fromRepoRoot, fromModule];
+  for (const p of candidates) {
+    if (fs.existsSync(p)) return p;
+  }
+  throw new Error(
+    `[db] No se encontró schema.sql (Vercel cwd o ruta del módulo). Probado:\n${candidates.join("\n")}`,
+  );
+}
+
 /**
  * Crea tablas y datos por defecto del esquema IPC (idempotente).
  * La base de datos en sí debe existir (ver `npm run db:ensure`).
@@ -36,8 +48,7 @@ export async function ensureSchema(): Promise<void> {
     console.log("[db] SKIP_DB_SCHEMA: no se aplica db/schema.sql");
     return;
   }
-  const dir = path.dirname(fileURLToPath(import.meta.url));
-  const schemaPath = path.join(dir, "..", "db", "schema.sql");
+  const schemaPath = resolveSchemaSqlPath();
   const sql = fs.readFileSync(schemaPath, "utf-8");
   await pool.query(sql);
   console.log("[db] Esquema IPC aplicado (tablas + configs por defecto).");

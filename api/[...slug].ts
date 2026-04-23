@@ -21,6 +21,16 @@ async function prepare(): Promise<void> {
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse): Promise<void> {
-  await prepare();
-  await cachedHandler!(req as never, res as never);
+  try {
+    await prepare();
+    await cachedHandler!(req as never, res as never);
+  } catch (e) {
+    console.error("[api]", e);
+    if (!res.headersSent) {
+      res.status(500).json({
+        error: "server_error",
+        message: "Fallo al preparar o ejecutar la API (revisá logs en Vercel y DATABASE_URL / schema).",
+      });
+    }
+  }
 }
