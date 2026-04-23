@@ -1,0 +1,65 @@
+:root {
+  /* Paleta alineada al logo CV: azul marino → teal → verde */
+  --bg: #f1f8f6;
+  --surface: #ffffff;
+  --text: #0b1f24;
+  --muted: #4a6b68;
+  --border: #cfe8e2;
+  --primary: #0d5c52;
+  --primary-soft: #c8ebe4;
+  --primary-gradient: linear-gradient(118deg, #0b3d52 0%, #0d6b5c 46%, #1a6b38 100%);
+  --danger: #b91c1c;
+  --warn: #b45309;
+  --ok: #166534;
+  --radius: 10px;
+  font-family: "Plus Jakarta Sans", system-ui, "Segoe UI", Roboto, sans-serif;
+  line-height: 1.5;
+  color: var(--text);
+  background: var(--bg);
+  text-rendering: optimizeLegibility;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+a {
+  color: var(--primary);
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+h1 {
+  font-size: 1.75rem;
+  margin: 0 0 0.5rem;
+}
+
+h2 {
+  font-size: 1.15rem;
+  margin: 0 0 0.35rem;
+}
+
+h3 {
+  font-size: 1.05rem;
+  margin: 0 0 0.35rem;
+}
