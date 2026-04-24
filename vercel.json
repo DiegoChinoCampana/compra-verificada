@@ -36,7 +36,19 @@
       "maxDuration": 120,
       "includeFiles": "server/dist/**"
     },
-    "api/analytics/[...path].ts": {
+    "api/analytics/article/[articleId]/[metric].ts": {
+      "maxDuration": 120,
+      "includeFiles": "server/dist/**"
+    },
+    "api/analytics/peers/by-article-detail.ts": {
+      "maxDuration": 120,
+      "includeFiles": "server/dist/**"
+    },
+    "api/analytics/operational/stale-scrapes.ts": {
+      "maxDuration": 120,
+      "includeFiles": "server/dist/**"
+    },
+    "api/analytics/operational/missing-recent-results.ts": {
       "maxDuration": 120,
       "includeFiles": "server/dist/**"
     },

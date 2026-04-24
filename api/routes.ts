@@ -16,7 +16,12 @@ export default function handler(_req: VercelRequest, res: VercelResponse): void 
       { ruta: "/api/listados/*", descripcion: "Debug catch-all listados (solo diagnóstico)" },
       { ruta: "/api/articles/:id", descripcion: "Express — ficha artículo (handler dedicado)" },
       { ruta: "/api/articles/:id/results", descripcion: "Express — listados scrapeados" },
-      { ruta: "/api/analytics/*", descripcion: "Express — tablero (analytics)" },
+      {
+        ruta: "/api/analytics/article/:id/:metric",
+        descripcion: "Express — tablero (price-series, dispersion, …)",
+      },
+      { ruta: "/api/analytics/peers/by-article-detail", descripcion: "Express — peers" },
+      { ruta: "/api/analytics/operational/*", descripcion: "Express — operación" },
       { ruta: "/api/report/*", descripcion: "Express — informe" },
       { ruta: "/api/analysis/*", descripcion: "Express — análisis" },
       {
