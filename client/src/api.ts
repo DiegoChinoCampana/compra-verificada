@@ -1,6 +1,7 @@
 const base = import.meta.env.VITE_API_URL ?? "";
 
-const DEFAULT_TIMEOUT_MS = 60_000;
+/** En prod (p. ej. Vercel) el primer /api puede tardar por cold start + Postgres remoto. */
+const DEFAULT_TIMEOUT_MS = import.meta.env.PROD ? 120_000 : 60_000;
 
 function anySignal(signals: AbortSignal[]): AbortSignal {
   const c = new AbortController();
@@ -35,11 +36,13 @@ export async function fetchJson<T>(path: string, init?: RequestInit): Promise<T>
     return r.json() as Promise<T>;
   } catch (e) {
     if (e instanceof DOMException && e.name === "AbortError") {
-      throw new Error(
+      const hint =
         init?.signal?.aborted
           ? "Solicitud cancelada."
-          : `La API no respondió en ${DEFAULT_TIMEOUT_MS / 1000}s (¿corre el servidor en :3001?).`,
-      );
+          : import.meta.env.DEV
+            ? `La API no respondió en ${DEFAULT_TIMEOUT_MS / 1000}s. En local: levantá el backend (puerto 3001) o usá «npm run dev» desde la raíz del monorepo (api + web). URL: ${url}`
+            : `La API no respondió en ${DEFAULT_TIMEOUT_MS / 1000}s. Revisá en Vercel la función /api, variables DATABASE_URL y logs. URL: ${url}`;
+      throw new Error(hint);
     }
     throw e;
   } finally {
