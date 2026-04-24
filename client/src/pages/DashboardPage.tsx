@@ -11,6 +11,7 @@ import {
   YAxis,
 } from "recharts";
 import { fetchJson } from "../api";
+import { RESULTS_SCRAPED_LEDE } from "../resultsScrapedLede";
 import { isFromResultsState, resultsListPath } from "../resultsNavState";
 import type {
   AnalyticsScopePayload,
@@ -156,6 +157,7 @@ export function DashboardPage() {
         </Link>{" "}
         / Resumen de ficha
       </p>
+      {fromResults ? <p className="lede">{RESULTS_SCRAPED_LEDE}</p> : null}
       <header className="page-head">
         <div>
           <h1>

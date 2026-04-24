@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useParams, useSearchParams } from "react-router-dom";
 import { fetchJson } from "../api";
+import { RESULTS_SCRAPED_LEDE } from "../resultsScrapedLede";
 import { isFromResultsState, resultsListPath } from "../resultsNavState";
 import type { ReportPayload } from "../types";
 
@@ -21,7 +22,7 @@ export function ReportPage() {
   const articleId = Number(id);
   const fromResults = isFromResultsState(location.state);
   const backTo = fromResults ? resultsListPath(location.state) : "/articulos";
-  const backLabel = fromResults ? "← Resultados" : "← Artículos";
+  const backLabel = fromResults ? "Resultados" : "Artículos";
   const [data, setData] = useState<ReportPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pdfBusy, setPdfBusy] = useState(false);
@@ -111,6 +112,8 @@ export function ReportPage() {
           {pdfBusy ? "Generando PDF…" : "Descargar PDF"}
         </button>
       </div>
+
+      {fromResults ? <p className="lede no-print">{RESULTS_SCRAPED_LEDE}</p> : null}
 
       <div id="report-pdf-root" className="report-pdf-root">
         <header className="report-header">

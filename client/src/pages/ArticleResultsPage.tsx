@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useParams, useSearchParams } from "react-router-dom";
 import { fetchJson } from "../api";
+import { RESULTS_SCRAPED_LEDE } from "../resultsScrapedLede";
 import { isFromResultsState, resultsListPath } from "../resultsNavState";
 import type { Article, ArticleResultsPagePayload } from "../types";
 
@@ -92,6 +93,7 @@ export function ArticleResultsPage() {
         </Link>{" "}
         / Listados scrapeados
       </p>
+      {fromResults ? <p className="lede">{RESULTS_SCRAPED_LEDE}</p> : null}
 
       <header className="page-head">
         <div>

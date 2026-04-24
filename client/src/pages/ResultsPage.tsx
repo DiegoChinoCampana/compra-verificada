@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { fetchJson } from "../api";
 import { productScopeQueryString } from "../productScopeUrl";
+import { RESULTS_SCRAPED_LEDE } from "../resultsScrapedLede";
 import type { FromResultsLocationState } from "../resultsNavState";
 import type { ScrapedResultListRow, ScrapedResultsPagePayload } from "../types";
 
@@ -86,11 +87,7 @@ export function ResultsPage() {
   return (
     <div>
       <h1>Resultados scrapeados</h1>
-      <p className="lede">
-        Filtrá por artículo, marca, detalle, título de publicación o tienda/vendedor. Desde cada fila
-        abrí el tablero, los listados o el informe con ese alcance (mismo título y, si indicaste,
-        misma tienda).
-      </p>
+      <p className="lede">{RESULTS_SCRAPED_LEDE}</p>
 
       <form className="card filters" onSubmit={applyFilters}>
         <div className="field-grid">
