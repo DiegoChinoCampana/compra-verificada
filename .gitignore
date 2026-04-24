@@ -9,5 +9,6 @@ server/.env
 !server/.env.example
 
 .DS_Store
+compra_verificada_local.sql
 *.log
 npm-debug.log*
