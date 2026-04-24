@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { prepareExpressRequestUrl, vercelExpressHandler } from "../vercelExpressBridge.js";
+import { prepareExpressRequestUrl, vercelExpressHandler } from "../lib/vercelExpressBridge.js";
 
 /**
  * Catch-all de Express para `/api/*` que no tenga handler más específico

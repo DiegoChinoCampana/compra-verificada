@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { vercelExpressHandler } from "../../vercelExpressBridge.js";
+import { vercelExpressHandler } from "../../lib/vercelExpressBridge.js";
 
 export const config = { maxDuration: 120 };
 

@@ -26,39 +26,39 @@
   "functions": {
     "api/[...slug].ts": {
       "maxDuration": 120,
-      "includeFiles": "server/dist/**"
+      "includeFiles": ["server/dist/**", "lib/vercelExpressBridge.ts"]
     },
     "api/articles/[id].ts": {
       "maxDuration": 120,
-      "includeFiles": "server/dist/**"
+      "includeFiles": ["server/dist/**", "lib/vercelExpressBridge.ts"]
     },
     "api/articles/[id]/results.ts": {
       "maxDuration": 120,
-      "includeFiles": "server/dist/**"
+      "includeFiles": ["server/dist/**", "lib/vercelExpressBridge.ts"]
     },
     "api/analytics/article/[articleId]/[metric].ts": {
       "maxDuration": 120,
-      "includeFiles": "server/dist/**"
+      "includeFiles": ["server/dist/**", "lib/vercelExpressBridge.ts"]
     },
     "api/analytics/peers/by-article-detail.ts": {
       "maxDuration": 120,
-      "includeFiles": "server/dist/**"
+      "includeFiles": ["server/dist/**", "lib/vercelExpressBridge.ts"]
     },
     "api/analytics/operational/stale-scrapes.ts": {
       "maxDuration": 120,
-      "includeFiles": "server/dist/**"
+      "includeFiles": ["server/dist/**", "lib/vercelExpressBridge.ts"]
     },
     "api/analytics/operational/missing-recent-results.ts": {
       "maxDuration": 120,
-      "includeFiles": "server/dist/**"
+      "includeFiles": ["server/dist/**", "lib/vercelExpressBridge.ts"]
     },
     "api/analysis/[...path].ts": {
       "maxDuration": 120,
-      "includeFiles": "server/dist/**"
+      "includeFiles": ["server/dist/**", "lib/vercelExpressBridge.ts"]
     },
     "api/report/[...path].ts": {
       "maxDuration": 120,
-      "includeFiles": "server/dist/**"
+      "includeFiles": ["server/dist/**", "lib/vercelExpressBridge.ts"]
     },
     "api/test-db.ts": {
       "maxDuration": 30

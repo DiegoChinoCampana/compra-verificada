@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 
-type AppModule = typeof import("./server/dist/app.js");
+type AppModule = typeof import("../server/dist/app.js");
 type ExpressApp = AppModule["app"];
 
 /**
@@ -24,14 +24,14 @@ async function prepare(): Promise<void> {
         }),
       );
       if (process.env.SKIP_DB_SCHEMA !== "true" && process.env.SKIP_DB_SCHEMA !== "1") {
-        const { ensureSchema } = await import("./server/dist/db.js");
+        const { ensureSchema } = await import("../server/dist/db.js");
         await ensureSchema();
       }
     })();
   }
   await preparePromise;
   if (!cachedApp) {
-    const { app } = await import("./server/dist/app.js");
+    const { app } = await import("../server/dist/app.js");
     cachedApp = app;
   }
 }
