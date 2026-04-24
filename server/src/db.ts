@@ -37,9 +37,15 @@ function connectionString(): string {
   return `postgresql://${encodeURIComponent(user)}:${encodeURIComponent(password)}@${host}:${port}/${dbname}`;
 }
 
-/** SSL: Postgres remoto con certificado propio suele fallar si rejectUnauthorized queda en true. */
+/** SSL: alineado con conexiones que usan `?sslmode=disable` en Vercel (servidor sin TLS). */
 function poolSslOption(): pg.PoolConfig["ssl"] | undefined {
   const cs = process.env.DATABASE_URL ?? "";
+  if (
+    /\bsslmode=disable\b/i.test(cs) ||
+    process.env.PGSSLMODE?.toLowerCase() === "disable"
+  ) {
+    return false;
+  }
   const sslModeRequire =
     /\bsslmode=require\b/i.test(cs) ||
     /\bsslmode=verify-full\b/i.test(cs) ||

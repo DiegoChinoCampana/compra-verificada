@@ -14,8 +14,13 @@ export default async function handler(
   }
 
   const startTime = Date.now();
+  const cs = process.env.DATABASE_URL ?? "";
+  const sslDisabled =
+    /\bsslmode=disable\b/i.test(cs) ||
+    process.env.PGSSLMODE?.toLowerCase() === "disable";
   const pool = new pg.Pool({
     connectionString: process.env.DATABASE_URL,
+    ...(sslDisabled ? { ssl: false as const } : {}),
     connectionTimeoutMillis: 10_000,
     max: 1,
   });
