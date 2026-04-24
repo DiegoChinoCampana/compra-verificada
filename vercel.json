@@ -10,9 +10,9 @@
     }
   ],
   "functions": {
-    "api/[[...slug]].ts": {
+    "src/index.ts": {
       "maxDuration": 120,
-      "includeFiles": "server/db/**"
+      "includeFiles": "server/dist/**"
     },
     "api/test-db.ts": {
       "maxDuration": 30
