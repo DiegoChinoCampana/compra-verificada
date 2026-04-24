@@ -1,7 +1,20 @@
-const base = import.meta.env.VITE_API_URL ?? "";
+/** Base opcional para la API (mismo u otro origen). Debe ser origen o URL absoluta; si incluye path, se ignora al unir con rutas que empiezan en `/`. */
+const rawApiBase = (import.meta.env.VITE_API_URL ?? "").trim();
 
 /** En prod (p. ej. Vercel) el primer /api puede tardar por cold start + Postgres remoto. */
 const DEFAULT_TIMEOUT_MS = import.meta.env.PROD ? 120_000 : 60_000;
+
+/** Evita URLs rotas tipo `https://host/articulos/24` + `/api/...` → path incorrecto. */
+function resolveRequestUrl(path: string): string {
+  if (path.startsWith("http://") || path.startsWith("https://")) return path;
+  const p = path.startsWith("/") ? path : `/${path}`;
+  if (!rawApiBase) return p;
+  try {
+    return new URL(p, rawApiBase.endsWith("/") ? rawApiBase : `${rawApiBase}/`).toString();
+  } catch {
+    return `${rawApiBase.replace(/\/+$/, "")}${p}`;
+  }
+}
 
 function anySignal(signals: AbortSignal[]): AbortSignal {
   const c = new AbortController();
@@ -18,7 +31,7 @@ function anySignal(signals: AbortSignal[]): AbortSignal {
 
 /** fetch JSON con tope de tiempo; si pasás `signal` en init, también se cancela al abortar ese signal. */
 export async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
-  const url = path.startsWith("http") ? path : `${base}${path}`;
+  const url = resolveRequestUrl(path);
   const timeout = new AbortController();
   const tid = setTimeout(() => timeout.abort(), DEFAULT_TIMEOUT_MS);
 
