@@ -3,7 +3,8 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 export const config = { maxDuration: 30 };
 
 export default function handler(req: VercelRequest, res: VercelResponse): void {
-  const pathSegments = req.query.path;
+  const q = req.query as Record<string, unknown>;
+  const pathSegments = q["...path"] ?? q.path;
 
   const debugInfo = {
     timestamp: new Date().toISOString(),

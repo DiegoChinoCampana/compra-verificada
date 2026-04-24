@@ -27,6 +27,8 @@ export default function handler(_req: VercelRequest, res: VercelResponse): void 
       nota: "La app no usa /tableros ni /api/tableros en producción; los handlers /api/tableros son solo para probar el enrutado de Vercel.",
     },
     nota: "Las rutas del frontend (SPA) usan rewrites en vercel.json hacia /index.html",
+    vercel_catch_all_query:
+      "En handlers `[...path].ts` / `[...slug].ts`, Vercel suele exponer segmentos en req.query['...path'] o req.query['...slug'], no en 'path'/'slug'.",
   };
 
   res.status(200).json(routesInfo);
