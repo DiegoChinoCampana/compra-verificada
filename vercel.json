@@ -10,10 +10,6 @@
     }
   ],
   "functions": {
-    "src/index.ts": {
-      "maxDuration": 120,
-      "includeFiles": "server/dist/**"
-    },
     "api/test-db.ts": {
       "maxDuration": 30
     }
