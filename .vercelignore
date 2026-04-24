@@ -1,4 +1,3 @@
 **/node_modules/**
-IPC
 client/node_modules
 server/node_modules

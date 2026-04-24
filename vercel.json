@@ -11,6 +11,7 @@
   ],
   "functions": {
     "api/[...slug].ts": {
+      "maxDuration": 60,
       "includeFiles": "server/db/**"
     }
   }
