@@ -4,9 +4,9 @@ type AppModule = typeof import("./server/dist/app.js");
 type ExpressApp = AppModule["app"];
 
 /**
- * Bridge entre `api/[[...slug]].ts` y Express (`server/src/app.ts`).
- * En Vercel, `req.url` a veces llega sin el prefijo `/api` (p. ej. `/articles/5` o
- * `/analytics/article/1/price-series`), y Express solo registra rutas bajo `/api/...` → NOT_FOUND.
+ * Bridge entre handlers en `api/**` y Express (`server/dist/app.js`).
+ * Vercel enruta mal algunas rutas multi-segmento si solo hay un catch-all en la raíz de `api/`;
+ * los handlers `api/<segmento>/[...path].ts` delegan acá con `normalizeRequestUrl`.
  */
 let cachedApp: ExpressApp | null = null;
 let preparePromise: Promise<void> | null = null;
@@ -61,7 +61,8 @@ function dedupeApiPath(path: string): string {
 }
 
 /**
- * Deja `req.url` (y `originalUrl` si existe) en la forma que espera el router de Express.
+ * Para el catch-all `api/[...slug].ts`: recompone `req.url` en la forma que espera Express
+ * (prefijo `/api/...` y sin duplicados).
  */
 export function prepareExpressRequestUrl(req: VercelRequest): void {
   const raw = req.url ?? "/";
@@ -79,6 +80,37 @@ export function prepareExpressRequestUrl(req: VercelRequest): void {
   const extended = req as VercelRequest & { originalUrl?: string };
   if (typeof extended.originalUrl === "string") {
     extended.originalUrl = fixed;
+  }
+}
+
+/**
+ * Si Vercel entrega `req.url` relativo al prefijo del handler (p. ej. `/5/results` bajo
+ * `api/articles/[...path].ts`), rearmamos la URL absoluta que espera Express.
+ */
+export function normalizeRequestUrl(req: VercelRequest, apiMount: string): void {
+  const mount = apiMount.endsWith("/") ? apiMount.slice(0, -1) : apiMount;
+  const u = req.url ?? "/";
+  if (u.startsWith("?")) {
+    req.url = `${mount}${u}`;
+    syncOriginalUrl(req);
+    return;
+  }
+  if (u === mount || u.startsWith(`${mount}/`) || u.startsWith(`${mount}?`)) {
+    syncOriginalUrl(req);
+    return;
+  }
+  if (u.startsWith("/")) {
+    req.url = `${mount}${u}`;
+  } else {
+    req.url = `${mount}/${u}`;
+  }
+  syncOriginalUrl(req);
+}
+
+function syncOriginalUrl(req: VercelRequest): void {
+  const extended = req as VercelRequest & { originalUrl?: string };
+  if (typeof extended.originalUrl === "string") {
+    extended.originalUrl = req.url ?? "/";
   }
 }
 
@@ -111,12 +143,12 @@ export function runExpress(
   });
 }
 
+/** Ejecuta Express; el caller debe ajustar `req.url` antes (prepare o normalize). */
 export async function vercelExpressHandler(
   req: VercelRequest,
   res: VercelResponse,
 ): Promise<void> {
   try {
-    prepareExpressRequestUrl(req);
     await prepare();
     await runExpress(cachedApp!, req, res);
   } catch (e) {
