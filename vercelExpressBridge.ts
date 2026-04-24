@@ -64,11 +64,38 @@ export function runExpress(
   });
 }
 
-/** Si Vercel entrega `req.url` relativo al prefijo del handler, rearmamos la URL que espera Express. */
+/**
+ * Si Vercel entrega `req.url` relativo al prefijo del handler, rearmamos la URL que espera Express.
+ *
+ * En handlers anidados (`api/articles/[...path].ts`, etc.) a veces llega solo `/articles/123` o
+ * `/article/1/price-series`; anteponer `mount` tal cual produciría `/api/articles/articles/123` y
+ * Express no matchea → 404 NOT_FOUND en el cliente.
+ */
 export function normalizeRequestUrl(req: VercelRequest, apiMount: string): void {
   const mount = apiMount.endsWith("/") ? apiMount.slice(0, -1) : apiMount;
-  const u = req.url ?? "/";
-  if (u === mount || u.startsWith(`${mount}/`)) return;
+  let u = req.url ?? "/";
+
+  if (u.startsWith("http://") || u.startsWith("https://")) {
+    try {
+      const parsed = new URL(u);
+      u = parsed.pathname + (parsed.search || "");
+    } catch {
+      /* seguir con u */
+    }
+  }
+
+  if (u === mount || u.startsWith(`${mount}/`) || u.startsWith(`${mount}?`)) return;
+
+  const parts = mount.split("/").filter(Boolean);
+  const afterApi = parts.length >= 2 ? parts[1] : "";
+  if (
+    afterApi &&
+    (u.startsWith(`/${afterApi}/`) || u === `/${afterApi}` || u.startsWith(`/${afterApi}?`))
+  ) {
+    req.url = `/api${u}`;
+    return;
+  }
+
   if (u.startsWith("/")) {
     req.url = `${mount}${u}`;
   } else {
