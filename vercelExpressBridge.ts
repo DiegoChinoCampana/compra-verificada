@@ -75,8 +75,8 @@ function queryParamJoined(
 
 /** Claves típicas del catch-all en Vercel para `api/foo/[...path].ts`. */
 const VERCEL_PATH_CATCH_KEYS = ["...path", "path"] as const;
-/** Claves típicas para `api/[...slug].ts`. */
-const VERCEL_SLUG_CATCH_KEYS = ["...slug", "slug"] as const;
+/** Un solo `api/[...slug].ts`: Vercel puede usar `...slug` u otras `...*` según versión. */
+const VERCEL_API_ROOT_CATCH_KEYS = ["...slug", "slug", ...VERCEL_PATH_CATCH_KEYS] as const;
 
 function isVercelCatchAllQueryKey(k: string, catchKeys: readonly string[]): boolean {
   return catchKeys.includes(k) || k.startsWith("...");
@@ -121,9 +121,13 @@ function mergeVercelCatchAllParam(
 ): void {
   const mount = mountPrefix.endsWith("/") ? mountPrefix.slice(0, -1) : mountPrefix;
   const q = req.query as Record<string, string | string[] | undefined>;
+  const extraDotKeys = Object.keys(q).filter(
+    (k) => k.startsWith("...") && !catchQueryKeys.includes(k),
+  );
+  const keysToTry = [...catchQueryKeys, ...extraDotKeys];
   let usedKey: string | null = null;
   let joined: string | null = null;
-  for (const key of catchQueryKeys) {
+  for (const key of keysToTry) {
     const j = queryParamJoined(q, key);
     if (j) {
       joined = j;
@@ -165,8 +169,9 @@ function mergeVercelCatchAllParam(
   const search = sp.toString() ? `?${sp.toString()}` : "";
   req.url = fullPath + search;
   try {
-    for (const k of catchQueryKeys) {
-      delete (q as Record<string, unknown>)[k];
+    if (usedKey) delete (q as Record<string, unknown>)[usedKey];
+    for (const k of Object.keys(q)) {
+      if (k.startsWith("...")) delete (q as Record<string, unknown>)[k];
     }
   } catch {
     /* query puede ser de solo lectura */
@@ -178,7 +183,7 @@ function mergeVercelCatchAllParam(
  * Para el catch-all `api/[...slug].ts`: recompone `req.url` en la forma que espera Express.
  */
 export function prepareExpressRequestUrl(req: VercelRequest): void {
-  mergeVercelCatchAllParam(req, VERCEL_SLUG_CATCH_KEYS, "/api");
+  mergeVercelCatchAllParam(req, VERCEL_API_ROOT_CATCH_KEYS, "/api");
 
   const raw = req.url ?? "/";
   let { path, search } = pathnameAndSearch(raw);
@@ -198,7 +203,7 @@ export function prepareExpressRequestUrl(req: VercelRequest): void {
  * Handlers `api/<segmento>/[...path].ts`: prefijo + resto; fusiona `req.query["...path"]`.
  */
 export function normalizeRequestUrl(req: VercelRequest, apiMount: string): void {
-  mergeVercelCatchAllParam(req, VERCEL_PATH_CATCH_KEYS, apiMount);
+  mergeVercelCatchAllParam(req, [...VERCEL_PATH_CATCH_KEYS], apiMount);
 
   const mount = apiMount.endsWith("/") ? apiMount.slice(0, -1) : apiMount;
   const u = req.url ?? "/";

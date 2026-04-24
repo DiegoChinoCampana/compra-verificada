@@ -14,11 +14,10 @@ export default function handler(_req: VercelRequest, res: VercelResponse): void 
       { ruta: "/api/tableros/*", descripcion: "Debug catch-all tableros (solo diagnóstico)" },
       { ruta: "/api/informe/*", descripcion: "Debug catch-all informe (solo diagnóstico)" },
       { ruta: "/api/listados/*", descripcion: "Debug catch-all listados (solo diagnóstico)" },
-      { ruta: "/api/[...slug]", descripcion: "Express catch-all (results, health, …)" },
-      { ruta: "/api/articles/*", descripcion: "Express → artículos" },
-      { ruta: "/api/analytics/*", descripcion: "Express → tablero (analytics)" },
-      { ruta: "/api/analysis/*", descripcion: "Express → análisis" },
-      { ruta: "/api/report/*", descripcion: "Express → informe PDF/datos" },
+      {
+        ruta: "/api/[...slug]",
+        descripcion: "Express: todo /api/* excepto rutas literales (articles, analytics, report, …)",
+      },
     ],
     rutas_spa_reales: {
       tablero: "/articulos/:id",
@@ -28,7 +27,7 @@ export default function handler(_req: VercelRequest, res: VercelResponse): void 
     },
     nota: "Las rutas del frontend (SPA) usan rewrites en vercel.json hacia /index.html",
     vercel_catch_all_query:
-      "En handlers `[...path].ts` / `[...slug].ts`, Vercel suele exponer segmentos en req.query['...path'] o req.query['...slug'], no en 'path'/'slug'.",
+      "Express va solo por `api/[...slug].ts`; Vercel expone segmentos en req.query['...slug'] / ['...path'] / otras claves '...*'. El bridge las fusiona en req.url.",
   };
 
   res.status(200).json(routesInfo);

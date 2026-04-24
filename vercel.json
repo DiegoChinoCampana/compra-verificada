@@ -28,22 +28,6 @@
       "maxDuration": 120,
       "includeFiles": "server/dist/**"
     },
-    "api/articles/[...path].ts": {
-      "maxDuration": 120,
-      "includeFiles": "server/dist/**"
-    },
-    "api/analytics/[...path].ts": {
-      "maxDuration": 120,
-      "includeFiles": "server/dist/**"
-    },
-    "api/analysis/[...path].ts": {
-      "maxDuration": 120,
-      "includeFiles": "server/dist/**"
-    },
-    "api/report/[...path].ts": {
-      "maxDuration": 120,
-      "includeFiles": "server/dist/**"
-    },
     "api/test-db.ts": {
       "maxDuration": 30
     },

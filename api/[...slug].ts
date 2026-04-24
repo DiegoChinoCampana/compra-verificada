@@ -2,8 +2,8 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { prepareExpressRequestUrl, vercelExpressHandler } from "../vercelExpressBridge.js";
 
 /**
- * Catch-all para `/api/*` sin handler más específico (`api/articles/[...path].ts`, etc.):
- * p. ej. `/api/results`, `/api/health`.
+ * Único catch-all de Express bajo `/api/*` (articles, analytics, report, analysis, results, …).
+ * Los handlers anidados `api/articles/[...path].ts` fallaban en Vercel con `outputDirectory` del SPA.
  */
 export const config = { maxDuration: 120 };
 
