@@ -64,7 +64,11 @@ export function AnalysisPeerGapPage() {
         Te ayuda a ver, entre búsquedas que vos configuraste como comparables (mismo nombre de artículo y
         mismo detalle en la ficha), si alguna marca está cotizando muy por encima o muy por debajo del
         “centro” del mercado según la última corrida. Sirve para priorizar revisiones de precio o detectar
-        fichas desalineadas respecto al resto del grupo.
+        fichas desalineadas respecto al resto del grupo.{" "}
+        <strong>Solo escribís en el campo de búsqueda un fragmento del artículo de la ficha</strong> (como en
+        otras pantallas de análisis): el <strong>detalle</strong> no lo ingresás acá; es el texto que ya
+        figura en cada ficha en la base (<em>detalle</em> al dar de alta o editar la búsqueda) y la
+        herramienta lo usa para armar grupos entre marcas comparables.
       </p>
       <p className="muted small">
         Compará el precio de referencia de cada ficha habilitada contra la{" "}
@@ -72,20 +76,22 @@ export function AnalysisPeerGapPage() {
       </p>
       <p className="muted small">
         <strong>Mismo “producto” acá no es el título de Mercado Libre.</strong> El agrupamiento usa solo los
-        textos de la ficha: <em>artículo</em> y <em>detalle</em>, iguales salvo mayúsculas/minúsculas y
-        espacios al inicio o al final. Si dos fichas tienen distinto detalle o distinto artículo
-        normalizado, no entran en el mismo grupo aunque en el listado aparezcan publicaciones con título
-        parecido.
+        textos guardados en la ficha: <em>artículo</em> y <em>detalle</em> (ambos vienen de la configuración
+        de cada búsqueda, no del listado de ML), iguales salvo mayúsculas/minúsculas y espacios al inicio o
+        al final. Si dos fichas tienen distinto detalle o distinto artículo normalizado, no entran en el
+        mismo grupo aunque en el listado aparezcan publicaciones con título parecido.
       </p>
 
       <AnalysisTechnicalHelp>
         <p>
-          <strong>Qué mirás en la base.</strong> Primero, en <code>articles</code>: fichas{" "}
-          <code>enabled = true</code> cuyo <code>articles.article</code> contiene el texto buscado (
-          <code>ILIKE</code>, hasta 120 filas en la consulta actual). El grupo “peer” no usa{" "}
-          <code>results.title</code>: arma un conjunto de fichas con el mismo <code>article</code> y el
-          mismo <code>detail</code> normalizados (<code>lower(trim(·))</code>; detalle ausente = cadena
-          vacía).
+          <strong>Qué mirás en la base.</strong> El formulario solo filtra por texto en{" "}
+          <code>articles.article</code> (<code>ILIKE</code>, fichas <code>enabled = true</code>, hasta 120
+          filas). El campo <code>articles.detail</code>{" "}
+          <strong>no se escribe en esta pantalla</strong>: es el valor que ya tiene cada ficha en la base; a
+          partir de cada candidata se buscan <strong>todas</strong> las fichas habilitadas con el mismo
+          artículo y el mismo detalle normalizados para formar el grupo peer. El grupo no usa{" "}
+          <code>results.title</code> de Mercado Libre. Normalización: <code>lower(trim(·))</code>; detalle
+          vacío en la ficha cuenta como cadena vacía.
         </p>
         <ol>
           <li>
@@ -124,6 +130,10 @@ export function AnalysisPeerGapPage() {
               minLength={2}
               required
             />
+            <span className="muted small" style={{ display: "block", marginTop: "0.35rem" }}>
+              El detalle de cada ficha no se busca acá: se usa el guardado en la ficha para agrupar marcas
+              comparables.
+            </span>
           </label>
         </div>
         <div className="form-actions">
