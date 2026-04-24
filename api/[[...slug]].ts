@@ -2,8 +2,8 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { vercelExpressHandler } from "../vercelExpressBridge.js";
 
 /**
- * Catch-all para `/api/*` que no tenga un handler más específico (`api/analysis/[...path].ts`, etc.).
- * Ver `vercelExpressBridge.ts`.
+ * Catch-all opcional bajo `/api` → Express. El nombre `[[...slug]]` evita que Vercel deje fuera rutas
+ * multi-segmento que con `[...slug]` solo a veces no matchean. Ver `vercelExpressBridge.ts`.
  */
 export const config = { maxDuration: 120 };
 

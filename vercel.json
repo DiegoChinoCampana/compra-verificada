@@ -10,23 +10,7 @@
     }
   ],
   "functions": {
-    "api/[...slug].ts": {
-      "maxDuration": 120,
-      "includeFiles": "server/db/**"
-    },
-    "api/analysis/[...path].ts": {
-      "maxDuration": 120,
-      "includeFiles": "server/db/**"
-    },
-    "api/analytics/[...path].ts": {
-      "maxDuration": 120,
-      "includeFiles": "server/db/**"
-    },
-    "api/report/[...path].ts": {
-      "maxDuration": 120,
-      "includeFiles": "server/db/**"
-    },
-    "api/articles/[...path].ts": {
+    "api/[[...slug]].ts": {
       "maxDuration": 120,
       "includeFiles": "server/db/**"
     },

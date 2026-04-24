@@ -1,9 +1,9 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 
 /**
- * Bridge compartido entre handlers en `api/**` y Express (`server/src/app.ts`).
- * Vercel puede no enrutar bien algunas rutas multi-segmento al solo `api/[...slug].ts`;
- * los handlers en `api/<segmento>/[...path].ts` delegan aquí.
+ * Bridge entre `api/[[...slug]].ts` y Express (`server/src/app.ts`).
+ * En Vercel, `req.url` a veces llega sin el prefijo `/api` (p. ej. `/articles/5` o
+ * `/analytics/article/1/price-series`), y Express solo registra rutas bajo `/api/...` → NOT_FOUND.
  */
 export type ExpressApp = Awaited<ReturnType<typeof import("./server/src/app.js")>>["app"];
 
@@ -32,6 +32,52 @@ async function prepare(): Promise<void> {
   if (!cachedApp) {
     const { app } = await import("./server/src/app.js");
     cachedApp = app;
+  }
+}
+
+function pathnameAndSearch(raw: string): { path: string; search: string } {
+  let s = raw;
+  if (s.startsWith("http://") || s.startsWith("https://")) {
+    try {
+      const parsed = new URL(s);
+      return { path: parsed.pathname || "/", search: parsed.search || "" };
+    } catch {
+      /* seguir */
+    }
+  }
+  const qIdx = s.indexOf("?");
+  if (qIdx === -1) return { path: s || "/", search: "" };
+  return { path: s.slice(0, qIdx) || "/", search: s.slice(qIdx) };
+}
+
+/** Corrige duplicados si antes se antepuso mal el prefijo. */
+function dedupeApiPath(path: string): string {
+  return path
+    .replace(/^\/api\/articles\/articles(?=\/|\?|$)/, "/api/articles")
+    .replace(/^\/api\/analytics\/analytics(?=\/|\?|$)/, "/api/analytics")
+    .replace(/^\/api\/analysis\/analysis(?=\/|\?|$)/, "/api/analysis")
+    .replace(/^\/api\/report\/report(?=\/|\?|$)/, "/api/report");
+}
+
+/**
+ * Deja `req.url` (y `originalUrl` si existe) en la forma que espera el router de Express.
+ */
+export function prepareExpressRequestUrl(req: VercelRequest): void {
+  const raw = req.url ?? "/";
+  let { path, search } = pathnameAndSearch(raw);
+  if (path === "") path = "/";
+
+  if (!path.startsWith("/api")) {
+    path = "/api" + (path.startsWith("/") ? path : `/${path}`);
+  }
+
+  path = dedupeApiPath(path);
+  const fixed = path + search;
+  req.url = fixed;
+
+  const extended = req as VercelRequest & { originalUrl?: string };
+  if (typeof extended.originalUrl === "string") {
+    extended.originalUrl = fixed;
   }
 }
 
@@ -64,50 +110,12 @@ export function runExpress(
   });
 }
 
-/**
- * Si Vercel entrega `req.url` relativo al prefijo del handler, rearmamos la URL que espera Express.
- *
- * En handlers anidados (`api/articles/[...path].ts`, etc.) a veces llega solo `/articles/123` o
- * `/article/1/price-series`; anteponer `mount` tal cual produciría `/api/articles/articles/123` y
- * Express no matchea → 404 NOT_FOUND en el cliente.
- */
-export function normalizeRequestUrl(req: VercelRequest, apiMount: string): void {
-  const mount = apiMount.endsWith("/") ? apiMount.slice(0, -1) : apiMount;
-  let u = req.url ?? "/";
-
-  if (u.startsWith("http://") || u.startsWith("https://")) {
-    try {
-      const parsed = new URL(u);
-      u = parsed.pathname + (parsed.search || "");
-    } catch {
-      /* seguir con u */
-    }
-  }
-
-  if (u === mount || u.startsWith(`${mount}/`) || u.startsWith(`${mount}?`)) return;
-
-  const parts = mount.split("/").filter(Boolean);
-  const afterApi = parts.length >= 2 ? parts[1] : "";
-  if (
-    afterApi &&
-    (u.startsWith(`/${afterApi}/`) || u === `/${afterApi}` || u.startsWith(`/${afterApi}?`))
-  ) {
-    req.url = `/api${u}`;
-    return;
-  }
-
-  if (u.startsWith("/")) {
-    req.url = `${mount}${u}`;
-  } else {
-    req.url = `${mount}/${u}`;
-  }
-}
-
 export async function vercelExpressHandler(
   req: VercelRequest,
   res: VercelResponse,
 ): Promise<void> {
   try {
+    prepareExpressRequestUrl(req);
     await prepare();
     await runExpress(cachedApp!, req, res);
   } catch (e) {
