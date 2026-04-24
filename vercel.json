@@ -13,6 +13,9 @@
     "api/[...slug].ts": {
       "maxDuration": 120,
       "includeFiles": "server/db/**"
+    },
+    "api/test-db.ts": {
+      "maxDuration": 30
     }
   }
 }
