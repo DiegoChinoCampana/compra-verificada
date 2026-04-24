@@ -6,8 +6,12 @@
   "rewrites": [
     { "source": "/articulos", "destination": "/index.html" },
     { "source": "/articulos/:path*", "destination": "/index.html" },
+    { "source": "/tableros", "destination": "/index.html" },
+    { "source": "/tableros/(.*)", "destination": "/index.html" },
     { "source": "/informe", "destination": "/index.html" },
-    { "source": "/informe/:path*", "destination": "/index.html" },
+    { "source": "/informe/(.*)", "destination": "/index.html" },
+    { "source": "/listados", "destination": "/index.html" },
+    { "source": "/listados/(.*)", "destination": "/index.html" },
     { "source": "/resultados", "destination": "/index.html" },
     { "source": "/resultados/:path*", "destination": "/index.html" },
     { "source": "/analisis", "destination": "/index.html" },
@@ -41,6 +45,21 @@
       "includeFiles": "server/dist/**"
     },
     "api/test-db.ts": {
+      "maxDuration": 30
+    },
+    "api/debug.ts": {
+      "maxDuration": 30
+    },
+    "api/routes.ts": {
+      "maxDuration": 30
+    },
+    "api/tableros/[...path].ts": {
+      "maxDuration": 30
+    },
+    "api/informe/[...path].ts": {
+      "maxDuration": 30
+    },
+    "api/listados/[...path].ts": {
       "maxDuration": 30
     }
   }

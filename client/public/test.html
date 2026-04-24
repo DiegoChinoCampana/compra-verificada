@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Test de Rutas - Compra Verificada</title>
+  <style>
+    body { font-family: Arial, sans-serif; padding: 20px; background: #f5f5f5; }
+    .container { max-width: 800px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; }
+    h1 { color: #333; }
+    .test-btn {
+      display: block; margin: 10px 0; padding: 15px;
+      background: #0070f3; color: white; border: none;
+      border-radius: 5px; cursor: pointer; font-size: 16px;
+      width: 100%;
+    }
+    .test-btn:hover { background: #0051a8; }
+    #resultado {
+      margin-top: 20px; padding: 15px;
+      background: #f0f0f0; border-radius: 5px;
+      white-space: pre-wrap; font-family: monospace;
+    }
+    .success { background: #d4edda; border: 1px solid #c3e6cb; }
+    .error { background: #f8d7da; border: 1px solid #f5c6cb; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Test de Rutas - Debug</h1>
+    <p>Hacé clic en cada botón para probar si la ruta responde:</p>
+
+    <button type="button" class="test-btn" onclick="testRuta('/api/debug')">
+      Probar /api/debug
+    </button>
+
+    <button type="button" class="test-btn" onclick="testRuta('/api/routes')">
+      Probar /api/routes
+    </button>
+
+    <button type="button" class="test-btn" onclick="testRuta('/api/articles/test')">
+      Probar /api/articles/test (Express)
+    </button>
+
+    <button type="button" class="test-btn" onclick="testRuta('/api/tableros/test')">
+      Probar /api/tableros/test
+    </button>
+
+    <button type="button" class="test-btn" onclick="testRuta('/api/informe/test')">
+      Probar /api/informe/test
+    </button>
+
+    <button type="button" class="test-btn" onclick="testRuta('/api/listados/test')">
+      Probar /api/listados/test
+    </button>
+
+    <h3>Resultado:</h3>
+    <div id="resultado">Hacé clic en un botón para ver el resultado...</div>
+  </div>
+
+  <script>
+    async function testRuta(ruta) {
+      const resultado = document.getElementById("resultado");
+      resultado.className = "";
+      resultado.textContent = "Probando " + ruta + "...";
+
+      try {
+        const inicio = Date.now();
+        const response = await fetch(ruta);
+        const tiempo = Date.now() - inicio;
+
+        const ct = response.headers.get("content-type") || "";
+        const data = ct.includes("application/json")
+          ? await response.json()
+          : await response.text();
+
+        resultado.className = response.ok ? "success" : "error";
+        resultado.textContent =
+          "Ruta: " + ruta + "\n" +
+          "Tiempo: " + tiempo + "ms\n" +
+          "Status: " + response.status + "\n" +
+          "Respuesta:\n" +
+          (typeof data === "string" ? data : JSON.stringify(data, null, 2));
+      } catch (error) {
+        resultado.className = "error";
+        resultado.textContent = "Error en " + ruta + ":\n" + (error && error.message ? error.message : String(error));
+      }
+    }
+  </script>
+</body>
+</html>
