@@ -1,15 +1,15 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { vercelExpressHandler } from "../vercelExpressBridge.js";
+import {
+  normalizeRequestUrl,
+  vercelExpressHandler,
+} from "../../vercelExpressBridge.js";
 
-/**
- * Catch-all para `/api/*` que no tenga un handler más específico (`api/analysis/[...path].ts`, etc.).
- * Ver `vercelExpressBridge.ts`.
- */
 export const config = { maxDuration: 120 };
 
 export default async function handler(
   req: VercelRequest,
   res: VercelResponse,
 ): Promise<void> {
+  normalizeRequestUrl(req, "/api/articles");
   await vercelExpressHandler(req, res);
 }
