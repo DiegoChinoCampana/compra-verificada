@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { fetchJson } from "../../api";
 import { productScopeQueryString } from "../../productScopeUrl";
+import { AnalysisTechnicalHelp } from "./AnalysisTechnicalHelp";
 import type { PriceJumpsByNamePayload } from "../../types";
 
 const DAY_OPTIONS = [
@@ -97,45 +98,36 @@ export function AnalysisPriceJumpsPage() {
         producto, igual que cuando filtrás por producto en el tablero.
       </p>
 
-      <details className="card block" style={{ marginTop: "0.75rem" }}>
-        <summary style={{ cursor: "pointer", fontWeight: 600 }}>
-          Cómo se calcula (para administradores)
-        </summary>
-        <div className="muted small" style={{ marginTop: "0.75rem" }}>
-          <ol style={{ margin: 0, paddingLeft: "1.25rem" }}>
-            <li>
-              <strong>Fichas candidatas:</strong> habilitadas cuyo <em>artículo</em> contiene el texto
-              buscado (coincidencia parcial, sin distinguir mayúsculas).
-            </li>
-            <li>
-              <strong>Por día y ficha:</strong> se usa la corrida de scrape más reciente de ese día
-              calendario; solo precios positivos.
-            </li>
-            <li>
-              <strong>Agrupación por producto:</strong> los resultados se agrupan por{" "}
-              <strong>título de publicación normalizado</strong>:{" "}
-              <code>lower</code>, colapsar bloques de espacios a uno solo y <code>trim</code> (misma
-              expresión SQL que al filtrar por producto en el tablero). No es igualdad exacta del texto
-              crudo tal como viene de Mercado Libre. Se descartan filas sin título.
-            </li>
-            <li>
-              <strong>Mínimo diario por título:</strong> para cada día con datos, el mínimo de precio entre
-              todas las publicaciones de ese título (sumando todas las fichas candidatas).
-            </li>
-            <li>
-              <strong>Salto entre días consecutivos con dato:</strong> ordenados por fecha, para cada par de
-              días seguidos con mínimo <code>prev</code> y <code>curr</code>:{" "}
-              <code>|curr − prev| / prev</code> (valor relativo, sin signo).
-            </li>
-            <li>
-              <strong>Por título en la ventana:</strong> se guarda el <strong>máximo</strong> de esos saltos.
-              La fila aparece solo si ese máximo es mayor o igual al umbral configurado (por defecto 15 %).
-              Las columnas “desde / hasta” corresponden al par de días donde ocurrió ese máximo (si hay
-              empate en magnitud, se prioriza el salto con fecha de fin más reciente).
-            </li>
-          </ol>
-        </div>
-      </details>
+      <AnalysisTechnicalHelp>
+        <p>
+          <strong>Qué mirás en la base.</strong> Igual que en estabilidad: primero{" "}
+          <code>articles</code> con <code>enabled = true</code> y <code>articles.article ILIKE</code> con tu
+          texto (hasta 250 ids). Luego <code>results</code> unidos por <code>search_id</code> y{" "}
+          <code>scrape_runs</code> para acotar al período y elegir la corrida más reciente por día y ficha.
+        </p>
+        <ol>
+          <li>
+            <strong>Agrupación por producto:</strong> clave a partir de <code>results.title</code> normalizado
+            (<code>lower</code>, espacios colapsados, <code>trim</code>), misma lógica que el tablero al
+            filtrar por producto. Sin título no entra.
+          </li>
+          <li>
+            <strong>Mínimo diario por título:</strong> por cada día con datos, el mínimo de{" "}
+            <code>price</code> entre todas las publicaciones de ese <code>title_key</code> (todas las fichas
+            candidatas).
+          </li>
+          <li>
+            <strong>Salto entre días consecutivos con dato:</strong> ordenados por fecha, para cada par de
+            días seguidos con mínimo <code>prev</code> y <code>curr</code>:{" "}
+            <code>|curr − prev| / prev</code> (relativo, sin signo).
+          </li>
+          <li>
+            <strong>Por título en la ventana:</strong> se guarda el <strong>máximo</strong> de esos saltos.
+            La fila aparece solo si ese máximo ≥ umbral (p. ej. 15 %). “Desde / hasta” es el par de días
+            donde ocurrió ese peor salto (empate: el de fin más reciente).
+          </li>
+        </ol>
+      </AnalysisTechnicalHelp>
 
       <form className="card filters" onSubmit={apply} style={{ marginTop: "1rem" }}>
         <div className="field-grid">

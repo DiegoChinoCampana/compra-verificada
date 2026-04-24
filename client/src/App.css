@@ -538,6 +538,34 @@ button:hover {
   margin: 0 0 1rem;
 }
 
+.analysis-tech-help {
+  margin-top: 0.75rem;
+}
+
+.analysis-tech-help__summary {
+  cursor: pointer;
+  font-weight: 600;
+  user-select: none;
+}
+
+.analysis-tech-help__body {
+  margin-top: 0.75rem;
+}
+
+.analysis-tech-help__body > p:first-child {
+  margin-top: 0;
+}
+
+.analysis-tech-help__body ol,
+.analysis-tech-help__body ul {
+  margin: 0.5rem 0 0;
+  padding-left: 1.25rem;
+}
+
+.analysis-tech-help__body li + li {
+  margin-top: 0.35rem;
+}
+
 @media print {
   .no-print {
     display: none !important;

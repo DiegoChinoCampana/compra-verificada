@@ -14,6 +14,7 @@ import {
 } from "recharts";
 import { fetchJson } from "../../api";
 import { productScopeQueryString } from "../../productScopeUrl";
+import { AnalysisTechnicalHelp } from "./AnalysisTechnicalHelp";
 import type {
   PriceStabilityByNamePayload,
   PriceStabilityDailySeries,
@@ -322,6 +323,35 @@ export function AnalysisPriceStabilityPage() {
         aparezca en varias búsquedas. Orden: primero los que menos variaron o bajaron de precio, con
         menos oscilación entre días.
       </p>
+
+      <AnalysisTechnicalHelp>
+        <p>
+          <strong>Qué mirás en la base.</strong> Primero se filtran fichas en la tabla{" "}
+          <code>articles</code>: solo <code>enabled = true</code> y el texto que escribís se busca en el
+          campo <code>articles.article</code> con <code>ILIKE</code> (contiene, sin importar mayúsculas).
+          No se usa <code>brand</code> ni <code>detail</code> en este paso. Se toman hasta 250{" "}
+          <code>articles.id</code> candidatos.
+        </p>
+        <p>
+          Después se traen los listados scrapeados de la tabla <code>results</code>, uniendo{" "}
+          <code>results.search_id</code> con esos ids (<code>search_id</code> apunta a la ficha). Las
+          fechas vienen de <code>scrape_runs</code> vía <code>results.scrape_run_id</code>, acotadas al
+          período (10 / 30 / 60 días).
+        </p>
+        <p>
+          Para agrupar “el mismo producto de Mercado Libre” no se usa el nombre de la ficha: se normaliza
+          el título de publicación <code>results.title</code> (minúsculas, espacios repetidos en uno solo,{" "}
+          <code>trim</code>), igual que cuando filtrás por producto en el tablero. Esa clave (
+          <code>title_key</code>) puede juntar filas de <strong>varias fichas</strong> distintas si el
+          título publicación coincide tras normalizar.
+        </p>
+        <p>
+          Por cada combinación <strong>ficha + día calendario</strong> se elige la corrida más reciente
+          ese día; el precio del día para ese título es el <strong>mínimo</strong> entre las publicaciones
+          de esa corrida. Solo entran títulos con al menos 2 días con dato en la ventana. El orden del
+          gráfico prioriza poca variación o baja de precio y baja oscilación relativa entre días.
+        </p>
+      </AnalysisTechnicalHelp>
 
       <form className="card filters" onSubmit={apply}>
         <div className="field-grid">

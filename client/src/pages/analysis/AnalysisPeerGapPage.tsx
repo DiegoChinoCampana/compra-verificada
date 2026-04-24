@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { fetchJson } from "../../api";
 import type { PeerGapByNamePayload } from "../../types";
+import { AnalysisTechnicalHelp } from "./AnalysisTechnicalHelp";
 
 function pctFmt(v: number | null | undefined): string {
   if (v == null || !Number.isFinite(v)) return "—";
@@ -77,40 +78,40 @@ export function AnalysisPeerGapPage() {
         parecido.
       </p>
 
-      <details className="card block" style={{ marginTop: "0.75rem" }}>
-        <summary style={{ cursor: "pointer", fontWeight: 600 }}>
-          Cómo se calcula (para administradores)
-        </summary>
-        <div className="muted small" style={{ marginTop: "0.75rem" }}>
-          <ol style={{ margin: 0, paddingLeft: "1.25rem" }}>
-            <li>
-              <strong>Candidatas:</strong> fichas habilitadas cuyo campo <em>artículo</em> contiene el
-              texto buscado (coincidencia parcial, sin distinguir mayúsculas).
-            </li>
-            <li>
-              <strong>Grupo peer:</strong> todas las fichas habilitadas con el mismo artículo y el mismo
-              detalle de la <strong>tabla de fichas</strong> (no el <code>title</code> de{" "}
-              <code>results</code>), comparando cadenas normalizadas (<code>lower(trim(·))</code>; si no hay
-              detalle se trata como cadena vacía). Incluye la propia ficha y el resto del grupo.
-            </li>
-            <li>
-              <strong>Precio de referencia por ficha:</strong> en la corrida de scrape más reciente (por
-              fecha de ejecución), el <strong>mínimo</strong> de precio entre los resultados de esa corrida,
-              descartando precios nulos o no positivos.
-            </li>
-            <li>
-              <strong>Mediana de peers:</strong> percentil 50 (<code>percentile_cont(0.5)</code>) de esos
-              mínimos en <strong>otras</strong> fichas del mismo grupo (mismo artículo + detalle, distinto{" "}
-              <code>id</code>). Si no hay ninguna otra ficha con precio válido, la mediana queda vacía.
-            </li>
-            <li>
-              <strong>Brecha %:</strong>{" "}
-              <code>(mi_ref_min − mediana_peers) / mediana_peers</code>. Positivo: esta ficha quedó por
-              encima de la mediana del grupo; negativo: por debajo.
-            </li>
-          </ol>
-        </div>
-      </details>
+      <AnalysisTechnicalHelp>
+        <p>
+          <strong>Qué mirás en la base.</strong> Primero, en <code>articles</code>: fichas{" "}
+          <code>enabled = true</code> cuyo <code>articles.article</code> contiene el texto buscado (
+          <code>ILIKE</code>, hasta 120 filas en la consulta actual). El grupo “peer” no usa{" "}
+          <code>results.title</code>: arma un conjunto de fichas con el mismo <code>article</code> y el
+          mismo <code>detail</code> normalizados (<code>lower(trim(·))</code>; detalle ausente = cadena
+          vacía).
+        </p>
+        <ol>
+          <li>
+            <strong>Candidatas:</strong> esas fichas que coinciden con el texto en <code>articles.article</code>
+            .
+          </li>
+          <li>
+            <strong>Grupo peer:</strong> todas las filas de <code>articles</code> habilitadas que comparten
+            mismo artículo + detalle (normalizado) con alguna candidata.
+          </li>
+          <li>
+            <strong>Precio de referencia por ficha:</strong> en <code>results</code> se toma la corrida más
+            reciente por <code>search_id</code> (vía <code>scrape_runs.executed_at</code>); el mínimo de{" "}
+            <code>price</code> en esa corrida, solo valores positivos.
+          </li>
+          <li>
+            <strong>Mediana de peers:</strong> sobre esos mínimos, la mediana (<code>percentile_cont(0.5)</code>
+            ) de las <strong>otras</strong> fichas del mismo grupo (mismo artículo + detalle, otro{" "}
+            <code>id</code>).
+          </li>
+          <li>
+            <strong>Brecha %:</strong> <code>(mi_ref_min − mediana_peers) / mediana_peers</code>. Positivo:
+            esta ficha quedó por encima del centro del grupo; negativo: por debajo.
+          </li>
+        </ol>
+      </AnalysisTechnicalHelp>
 
       <form className="card filters" onSubmit={apply} style={{ marginTop: "1rem" }}>
         <div className="field-grid">
