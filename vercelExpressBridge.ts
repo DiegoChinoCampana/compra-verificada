@@ -5,8 +5,8 @@ type ExpressApp = AppModule["app"];
 
 /**
  * Bridge entre handlers en `api/**` y Express (`server/dist/app.js`).
- * Vercel enruta mal algunas rutas multi-segmento si solo hay un catch-all en la raíz de `api/`;
- * los handlers `api/<segmento>/[...path].ts` delegan acá con `normalizeRequestUrl`.
+ * Vercel a veces deja los segmentos del catch-all en `req.query` (`path`, `slug`) y `req.url`
+ * incompleto; Express no matchea `/api/...` y la plataforma responde NOT_FOUND en HTML.
  */
 let cachedApp: ExpressApp | null = null;
 let preparePromise: Promise<void> | null = null;
@@ -60,11 +60,69 @@ function dedupeApiPath(path: string): string {
     .replace(/^\/api\/report\/report(?=\/|\?|$)/, "/api/report");
 }
 
+function queryParamJoined(
+  q: Record<string, string | string[] | undefined>,
+  key: string,
+): string | null {
+  const v = q[key];
+  if (v === undefined) return null;
+  const parts = Array.isArray(v) ? v : [v];
+  const joined = parts
+    .filter((p): p is string => typeof p === "string" && p.length > 0)
+    .join("/");
+  return joined.length ? joined : null;
+}
+
 /**
- * Para el catch-all `api/[...slug].ts`: recompone `req.url` en la forma que espera Express
- * (prefijo `/api/...` y sin duplicados).
+ * Recompone `/api/...` desde `req.query.path` / `req.query.slug` (catch-all de Vercel).
+ */
+function mergeVercelCatchAllParam(req: VercelRequest, key: string, mountPrefix: string): void {
+  const mount = mountPrefix.endsWith("/") ? mountPrefix.slice(0, -1) : mountPrefix;
+  const q = req.query as Record<string, string | string[] | undefined>;
+  const joined = queryParamJoined(q, key);
+  if (!joined) return;
+
+  const fullPath = mount === "/api" ? `/api/${joined}` : `${mount}/${joined}`;
+  const url = req.url ?? "/";
+  const { path: pathOnly } = pathnameAndSearch(url);
+
+  if (
+    pathOnly === fullPath ||
+    pathOnly.startsWith(`${fullPath}/`) ||
+    pathOnly.startsWith(`${fullPath}?`)
+  ) {
+    return;
+  }
+
+  const { search: searchFromUrl } = pathnameAndSearch(url);
+  const sp = new URLSearchParams(
+    searchFromUrl.startsWith("?") ? searchFromUrl.slice(1) : "",
+  );
+  for (const [qk, val] of Object.entries(q)) {
+    if (qk === key) continue;
+    if (typeof val === "string") sp.append(qk, val);
+    else if (Array.isArray(val)) {
+      for (const item of val) {
+        if (item != null && item !== "") sp.append(qk, String(item));
+      }
+    }
+  }
+  const search = sp.toString() ? `?${sp.toString()}` : "";
+  req.url = fullPath + search;
+  try {
+    delete (q as Record<string, unknown>)[key];
+  } catch {
+    /* query puede ser de solo lectura */
+  }
+  syncOriginalUrl(req);
+}
+
+/**
+ * Para el catch-all `api/[...slug].ts`: recompone `req.url` en la forma que espera Express.
  */
 export function prepareExpressRequestUrl(req: VercelRequest): void {
+  mergeVercelCatchAllParam(req, "slug", "/api");
+
   const raw = req.url ?? "/";
   let { path, search } = pathnameAndSearch(raw);
   if (path === "") path = "/";
@@ -76,18 +134,15 @@ export function prepareExpressRequestUrl(req: VercelRequest): void {
   path = dedupeApiPath(path);
   const fixed = path + search;
   req.url = fixed;
-
-  const extended = req as VercelRequest & { originalUrl?: string };
-  if (typeof extended.originalUrl === "string") {
-    extended.originalUrl = fixed;
-  }
+  syncOriginalUrl(req);
 }
 
 /**
- * Si Vercel entrega `req.url` relativo al prefijo del handler (p. ej. `/5/results` bajo
- * `api/articles/[...path].ts`), rearmamos la URL absoluta que espera Express.
+ * Handlers `api/<segmento>/[...path].ts`: prefijo + resto; también fusiona `req.query.path`.
  */
 export function normalizeRequestUrl(req: VercelRequest, apiMount: string): void {
+  mergeVercelCatchAllParam(req, "path", apiMount);
+
   const mount = apiMount.endsWith("/") ? apiMount.slice(0, -1) : apiMount;
   const u = req.url ?? "/";
   if (u.startsWith("?")) {
@@ -109,9 +164,7 @@ export function normalizeRequestUrl(req: VercelRequest, apiMount: string): void 
 
 function syncOriginalUrl(req: VercelRequest): void {
   const extended = req as VercelRequest & { originalUrl?: string };
-  if (typeof extended.originalUrl === "string") {
-    extended.originalUrl = req.url ?? "/";
-  }
+  extended.originalUrl = req.url ?? "/";
 }
 
 export function runExpress(
