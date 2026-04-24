@@ -1,8 +1,10 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import serverless from "serverless-http";
-import { app } from "../server/src/app.js";
-import { ensureSchema } from "../server/src/db.js";
 
+/**
+ * Vercel empaqueta este handler en CommonJS; el servidor es ESM (type: module / "NodeNext").
+ * Los `import()` dinámicos evitan ERR_REQUIRE_ESM al cargar `server/src/*.js`.
+ */
 let cachedHandler: ReturnType<typeof serverless> | null = null;
 let preparePromise: Promise<void> | null = null;
 
@@ -10,12 +12,14 @@ async function prepare(): Promise<void> {
   if (!preparePromise) {
     preparePromise = (async () => {
       if (process.env.SKIP_DB_SCHEMA !== "true" && process.env.SKIP_DB_SCHEMA !== "1") {
+        const { ensureSchema } = await import("../server/src/db.js");
         await ensureSchema();
       }
     })();
   }
   await preparePromise;
   if (!cachedHandler) {
+    const { app } = await import("../server/src/app.js");
     cachedHandler = serverless(app);
   }
 }
