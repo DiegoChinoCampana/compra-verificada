@@ -4,6 +4,16 @@
   "installCommand": "npm run setup",
   "outputDirectory": "client/dist",
   "rewrites": [
+    { "source": "/articulos", "destination": "/index.html" },
+    { "source": "/articulos/:path*", "destination": "/index.html" },
+    { "source": "/informe", "destination": "/index.html" },
+    { "source": "/informe/:path*", "destination": "/index.html" },
+    { "source": "/resultados", "destination": "/index.html" },
+    { "source": "/resultados/:path*", "destination": "/index.html" },
+    { "source": "/analisis", "destination": "/index.html" },
+    { "source": "/analisis/:path*", "destination": "/index.html" },
+    { "source": "/operacion", "destination": "/index.html" },
+    { "source": "/operacion/:path*", "destination": "/index.html" },
     {
       "source": "/((?!api/).*)",
       "destination": "/index.html"
