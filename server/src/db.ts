@@ -7,8 +7,28 @@ dotenv.config();
 const { Pool } = pg;
 
 function connectionString(): string {
-  const url = process.env.DATABASE_URL;
-  if (url) return url;
+  if (process.env.VERCEL) {
+    const hasUrl = Boolean(process.env.DATABASE_URL?.trim());
+    const hasHost = Boolean(process.env.DB_HOST?.trim());
+    if (!hasUrl && !hasHost) {
+      throw new Error(
+        "[db] En Vercel falta DATABASE_URL o DB_HOST en Project Settings → Environment Variables (Production). Un .env en el repo no alcanza si no está configurado en el dashboard.",
+      );
+    }
+  }
+
+  const url = process.env.DATABASE_URL?.trim();
+  if (url) {
+    try {
+      const u = new URL(url);
+      if (process.env.VERCEL && !u.searchParams.has("connect_timeout")) {
+        u.searchParams.set("connect_timeout", "12");
+      }
+      return u.toString();
+    } catch {
+      return url;
+    }
+  }
   const host = process.env.DB_HOST ?? "localhost";
   const port = process.env.DB_PORT ?? "5432";
   const dbname = process.env.DB_NAME ?? "postgres";
@@ -37,7 +57,8 @@ const poolMax = process.env.VERCEL ? 1 : Number(process.env.PG_POOL_MAX ?? 10);
 const poolConfig: pg.PoolConfig = {
   connectionString: connectionString(),
   max: Number.isFinite(poolMax) && poolMax > 0 ? poolMax : 10,
-  connectionTimeoutMillis: 20000,
+  /** Por encima del connect_timeout de la URL; corta antes del maxDuration de Vercel si la red cuelga. */
+  connectionTimeoutMillis: 25_000,
 };
 
 const ssl = poolSslOption();

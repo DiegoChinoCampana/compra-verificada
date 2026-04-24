@@ -11,6 +11,15 @@ let preparePromise: Promise<void> | null = null;
 async function prepare(): Promise<void> {
   if (!preparePromise) {
     preparePromise = (async () => {
+      console.log(
+        "[api] prepare",
+        JSON.stringify({
+          vercel: Boolean(process.env.VERCEL),
+          hasDatabaseUrl: Boolean(process.env.DATABASE_URL?.trim()),
+          hasDbHost: Boolean(process.env.DB_HOST?.trim()),
+          skipSchema: process.env.SKIP_DB_SCHEMA === "true" || process.env.SKIP_DB_SCHEMA === "1",
+        }),
+      );
       if (process.env.SKIP_DB_SCHEMA !== "true" && process.env.SKIP_DB_SCHEMA !== "1") {
         const { ensureSchema } = await import("../server/src/db.js");
         await ensureSchema();
