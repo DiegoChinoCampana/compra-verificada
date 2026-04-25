@@ -56,6 +56,10 @@
       "maxDuration": 120,
       "includeFiles": "server/dist/**"
     },
+    "api/analytics/operational/product-clustering-run.ts": {
+      "maxDuration": 300,
+      "includeFiles": "server/dist/**"
+    },
     "api/analysis/[...path].ts": {
       "maxDuration": 120,
       "includeFiles": "server/dist/**"

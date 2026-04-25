@@ -1,6 +1,11 @@
 import { Router } from "express";
+import {
+  assertClusterBatchAuthorized,
+  clusterBatchRequiresClientSecret,
+} from "../clusterRunAuth.js";
 import { readClusterBatchMeta } from "../clusterBatchMeta.js";
 import { pool } from "../db.js";
+import { runProductClusteringJob } from "../jobs/productClusteringJob.js";
 import { parseProductScopeQuery } from "../productScopeQuery.js";
 import { RUNS_ONE_PER_DAY_CTE } from "../sql/runsOnePerDay.js";
 import {
@@ -363,13 +368,67 @@ analyticsRouter.get("/operational/product-clustering-meta", async (_req, res) =>
         (SELECT COUNT(*)::int FROM result_embeddings) AS with_embedding,
         (SELECT COUNT(*)::int FROM results) AS total_results
     `);
-    res.json({ lastRun, counts: rows[0] ?? null });
+    res.json({
+      lastRun,
+      counts: rows[0] ?? null,
+      requiresClusterBatchSecret: clusterBatchRequiresClientSecret(),
+    });
   } catch (e) {
     res.json({
       lastRun,
       counts: null,
       countsError: e instanceof Error ? e.message : String(e),
+      requiresClusterBatchSecret: clusterBatchRequiresClientSecret(),
     });
+  }
+});
+
+type ClusterRunBody = {
+  article?: unknown;
+  secret?: unknown;
+  days?: unknown;
+  limit?: unknown;
+  batchSize?: unknown;
+  minSimilarity?: unknown;
+  minPts?: unknown;
+  embedOnly?: unknown;
+  clusterOnly?: unknown;
+  resetScope?: unknown;
+};
+
+analyticsRouter.post("/operational/product-clustering-run", async (req, res) => {
+  try {
+    const headerSecret = req.headers["x-cluster-batch-secret"];
+    const body = (req.body ?? {}) as ClusterRunBody;
+    const secret =
+      (typeof headerSecret === "string" ? headerSecret : Array.isArray(headerSecret) ? headerSecret[0] : undefined) ??
+      body.secret;
+    assertClusterBatchAuthorized(secret);
+
+    const article = typeof body.article === "string" ? body.article.trim() : "";
+    if (article.length < 2) {
+      res.status(400).json({ error: "body.article es obligatorio (mín. 2 caracteres)" });
+      return;
+    }
+
+    const payload = await runProductClusteringJob(pool, {
+      article,
+      days: body.days !== undefined ? Number(body.days) : undefined,
+      limit: body.limit !== undefined ? Number(body.limit) : undefined,
+      batchSize: body.batchSize !== undefined ? Number(body.batchSize) : undefined,
+      minSimilarity: body.minSimilarity !== undefined ? Number(body.minSimilarity) : undefined,
+      minPts: body.minPts !== undefined ? Number(body.minPts) : undefined,
+      embedOnly: body.embedOnly === true,
+      clusterOnly: body.clusterOnly === true,
+      resetScope: body.resetScope === true,
+    });
+    res.json({ ok: true as const, result: payload });
+  } catch (e) {
+    const status = typeof e === "object" && e !== null && "status" in e ? Number((e as { status: number }).status) : 0;
+    const code = status >= 400 && status < 600 ? status : 500;
+    const message = e instanceof Error ? e.message : String(e);
+    console.error("[cluster-run]", e);
+    res.status(code).json({ ok: false as const, error: message });
   }
 });
 

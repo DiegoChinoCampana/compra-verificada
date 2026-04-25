@@ -116,6 +116,8 @@ export type ScrapedResultListRow = {
 
 /** Respuesta de `/api/analytics/operational/product-clustering-meta`. */
 export type ProductClusteringMetaPayload = {
+  /** Si hay que enviar `secret` en el POST (Vercel o servidor con `CLUSTER_BATCH_SECRET`). */
+  requiresClusterBatchSecret?: boolean;
   lastRun: {
     finishedAt: string;
     article: string;
@@ -136,6 +138,11 @@ export type ProductClusteringMetaPayload = {
   } | null;
   countsError?: string;
 };
+
+/** Respuesta de `POST /api/analytics/operational/product-clustering-run`. */
+export type ProductClusteringRunResponse =
+  | { ok: true; result: NonNullable<ProductClusteringMetaPayload["lastRun"]> }
+  | { ok: false; error: string };
 
 export type ScrapedResultsPagePayload = {
   total: number;

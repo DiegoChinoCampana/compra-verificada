@@ -29,11 +29,21 @@ function anySignal(signals: AbortSignal[]): AbortSignal {
   return c.signal;
 }
 
+export type FetchJsonOptions = {
+  /** Por defecto usa el tope global (más alto en prod por cold start). */
+  timeoutMs?: number;
+};
+
 /** fetch JSON con tope de tiempo; si pasás `signal` en init, también se cancela al abortar ese signal. */
-export async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
+export async function fetchJson<T>(
+  path: string,
+  init?: RequestInit,
+  opts?: FetchJsonOptions,
+): Promise<T> {
   const url = resolveRequestUrl(path);
+  const timeoutMs = opts?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const timeout = new AbortController();
-  const tid = setTimeout(() => timeout.abort(), DEFAULT_TIMEOUT_MS);
+  const tid = setTimeout(() => timeout.abort(), timeoutMs);
 
   const merged =
     init?.signal != null
@@ -53,8 +63,8 @@ export async function fetchJson<T>(path: string, init?: RequestInit): Promise<T>
         init?.signal?.aborted
           ? "Solicitud cancelada."
           : import.meta.env.DEV
-            ? `La API no respondió en ${DEFAULT_TIMEOUT_MS / 1000}s. En local: levantá el backend (puerto 3001) o usá «npm run dev» desde la raíz del monorepo (api + web). URL: ${url}`
-            : `La API no respondió en ${DEFAULT_TIMEOUT_MS / 1000}s. Revisá en Vercel la función /api, variables DATABASE_URL y logs. URL: ${url}`;
+            ? `La API no respondió en ${timeoutMs / 1000}s. En local: levantá el backend (puerto 3001) o usá «npm run dev» desde la raíz del monorepo (api + web). URL: ${url}`
+            : `La API no respondió en ${timeoutMs / 1000}s. Revisá en Vercel la función /api, variables DATABASE_URL y logs. URL: ${url}`;
       throw new Error(hint);
     }
     throw e;

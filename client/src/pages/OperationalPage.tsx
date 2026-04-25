@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react";
+import { type FormEvent, useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { fetchJson } from "../api";
-import type { Article, ProductClusteringMetaPayload } from "../types";
+import type { Article, ProductClusteringMetaPayload, ProductClusteringRunResponse } from "../types";
 
 export function OperationalPage() {
   const [stale, setStale] = useState<Article[]>([]);
@@ -9,35 +9,105 @@ export function OperationalPage() {
   const [clusterMeta, setClusterMeta] = useState<ProductClusteringMetaPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const [clusterArticle, setClusterArticle] = useState("");
+  const [clusterDays, setClusterDays] = useState(60);
+  const [clusterSecret, setClusterSecret] = useState("");
+  const [clusterMode, setClusterMode] = useState<"full" | "embed" | "cluster">("full");
+  const [clusterReset, setClusterReset] = useState(false);
+  const [clusterRunning, setClusterRunning] = useState(false);
+  const [clusterRunError, setClusterRunError] = useState<string | null>(null);
+  const [clusterRunOk, setClusterRunOk] = useState<string | null>(null);
+
+  const reloadLists = useCallback(async (signal?: AbortSignal) => {
+    const [s, m, c] = await Promise.all([
+      fetchJson<Article[]>(`/api/analytics/operational/stale-scrapes?days=7`, { signal }),
+      fetchJson<Article[]>(`/api/analytics/operational/missing-recent-results?days=14`, {
+        signal,
+      }),
+      fetchJson<ProductClusteringMetaPayload>(`/api/analytics/operational/product-clustering-meta`, {
+        signal,
+      }),
+    ]);
+    setStale(s);
+    setMissing(m);
+    setClusterMeta(c);
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
+    const ac = new AbortController();
     (async () => {
       setError(null);
       try {
-        const [s, m, c] = await Promise.all([
-          fetchJson<Article[]>(`/api/analytics/operational/stale-scrapes?days=7`),
-          fetchJson<Article[]>(`/api/analytics/operational/missing-recent-results?days=14`),
-          fetchJson<ProductClusteringMetaPayload>(
-            `/api/analytics/operational/product-clustering-meta`,
-          ),
-        ]);
-        if (!cancelled) {
-          setStale(s);
-          setMissing(m);
-          setClusterMeta(c);
-        }
+        await reloadLists(ac.signal);
       } catch (e) {
         if (!cancelled) setError(String(e));
       }
     })();
     return () => {
       cancelled = true;
+      ac.abort();
     };
-  }, []);
+  }, [reloadLists]);
+
+  async function onRunClustering(e: FormEvent) {
+    e.preventDefault();
+    setClusterRunError(null);
+    setClusterRunOk(null);
+    const article = clusterArticle.trim();
+    if (article.length < 2) {
+      setClusterRunError("Indicá un texto de artículo (mínimo 2 caracteres).");
+      return;
+    }
+    if (clusterMeta?.requiresClusterBatchSecret && !clusterSecret.trim()) {
+      setClusterRunError("En este entorno hay que ingresar el token de clustering.");
+      return;
+    }
+    setClusterRunning(true);
+    try {
+      const body: Record<string, unknown> = {
+        article,
+        days: clusterDays,
+        resetScope: clusterReset,
+        embedOnly: clusterMode === "embed",
+        clusterOnly: clusterMode === "cluster",
+      };
+      if (clusterSecret.trim()) body.secret = clusterSecret.trim();
+
+      const res = await fetchJson<ProductClusteringRunResponse>(
+        `/api/analytics/operational/product-clustering-run`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        },
+        { timeoutMs: 600_000 },
+      );
+      if (!res.ok) {
+        setClusterRunError(res.error);
+        return;
+      }
+      setClusterRunOk(
+        `Listo en ${(res.result.durationMs / 1000).toFixed(1)}s · embeddings ${res.result.embedded} · en clúster ${res.result.inCluster} (ruido ${res.result.noise}).`,
+      );
+      const meta = await fetchJson<ProductClusteringMetaPayload>(
+        `/api/analytics/operational/product-clustering-meta`,
+      );
+      setClusterMeta(meta);
+    } catch (err) {
+      setClusterRunError(String(err));
+    } finally {
+      setClusterRunning(false);
+    }
+  }
 
   if (error) {
     return <p className="error">{error}</p>;
   }
+
+  const needSecret = Boolean(clusterMeta?.requiresClusterBatchSecret);
+  const submitDisabled =
+    clusterRunning || (needSecret && !clusterSecret.trim()) || clusterArticle.trim().length < 2;
 
   return (
     <div>
@@ -50,15 +120,92 @@ export function OperationalPage() {
       <section className="card block">
         <h2>Clustering semántico (product_key)</h2>
         <p className="muted small">
-          El batch <strong>no corre solo</strong>: hay que ejecutarlo en la máquina donde está el
-          código y las variables <code>OPENAI_API_KEY</code> / Postgres. Al terminar bien, se
-          guarda un resumen en la base; acá ves la última corrida y cuántas filas tienen clave /
-          embedding.
+          Genera embeddings (OpenAI) y asigna <code>product_key</code> en la base. Podés usar el
+          botón (misma lógica que el script) o la terminal con{" "}
+          <code>npm run embed:cluster --prefix server</code>. Hace falta{" "}
+          <code>OPENAI_API_KEY</code> en el servidor y Postgres con extensión <code>vector</code>.
         </p>
+        {clusterMeta?.requiresClusterBatchSecret ? (
+          <p className="muted small" style={{ marginTop: "0.35rem" }}>
+            <strong>Producción / Vercel:</strong> configurá <code>CLUSTER_BATCH_SECRET</code> en las
+            variables de entorno e ingresá el mismo valor abajo como token (no viaja por URL).
+          </p>
+        ) : (
+          <p className="muted small" style={{ marginTop: "0.35rem" }}>
+            En desarrollo local sin <code>CLUSTER_BATCH_SECRET</code> el endpoint acepta la
+            corrida sin token (no exponer el puerto a internet).
+          </p>
+        )}
+
+        <form className="card" style={{ marginTop: "0.75rem", padding: "1rem" }} onSubmit={onRunClustering}>
+          <div className="field-grid" style={{ gap: "0.75rem" }}>
+            <label>
+              Texto de artículo (ILIKE)
+              <input
+                value={clusterArticle}
+                onChange={(e) => setClusterArticle(e.target.value)}
+                placeholder="Ej: Microondas"
+                autoComplete="off"
+              />
+            </label>
+            <label>
+              Ventana (días)
+              <input
+                type="number"
+                min={7}
+                max={120}
+                value={clusterDays}
+                onChange={(e) => setClusterDays(Number(e.target.value) || 60)}
+              />
+            </label>
+            <label>
+              Modo
+              <select
+                value={clusterMode}
+                onChange={(e) => setClusterMode(e.target.value as "full" | "embed" | "cluster")}
+              >
+                <option value="full">Completo (embed + cluster)</option>
+                <option value="embed">Solo embeddings</option>
+                <option value="cluster">Solo clustering</option>
+              </select>
+            </label>
+            <label style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+              <input
+                type="checkbox"
+                checked={clusterReset}
+                onChange={(e) => setClusterReset(e.target.checked)}
+              />
+              Resetear claves en el universo antes de agrupar
+            </label>
+            <label>
+              Token <span className="muted">(si aplica)</span>
+              <input
+                type="password"
+                value={clusterSecret}
+                onChange={(e) => setClusterSecret(e.target.value)}
+                placeholder={needSecret ? "CLUSTER_BATCH_SECRET" : "Opcional en local"}
+                autoComplete="off"
+              />
+            </label>
+          </div>
+          <div className="form-actions" style={{ marginTop: "0.75rem" }}>
+            <button type="submit" disabled={submitDisabled}>
+              {clusterRunning ? "Ejecutando…" : "Ejecutar clustering"}
+            </button>
+          </div>
+        </form>
+
+        {clusterRunError ? <p className="error" style={{ marginTop: "0.75rem" }}>{clusterRunError}</p> : null}
+        {clusterRunOk ? (
+          <p className="muted small" style={{ marginTop: "0.75rem" }}>
+            {clusterRunOk}
+          </p>
+        ) : null}
+
         <pre
           className="muted small"
           style={{
-            marginTop: "0.5rem",
+            marginTop: "0.75rem",
             padding: "0.75rem",
             background: "rgba(0,0,0,0.05)",
             borderRadius: 6,
@@ -98,13 +245,12 @@ export function OperationalPage() {
           </p>
         ) : (
           <p className="muted small" style={{ marginTop: "0.75rem" }}>
-            Todavía no hay registro de una corrida exitosa del script (o la fila de config id 100
-            no existe).
+            Todavía no hay registro de una corrida exitosa (config id 100).
           </p>
         )}
         <p className="muted small" style={{ marginTop: "0.5rem" }}>
-          En <Link to="/resultados">Resultados</Link> y en los listados por artículo verás las
-          columnas <code>product_key</code> y <code>product_cluster_id</code> cuando existan.
+          En <Link to="/resultados">Resultados</Link> y en los listados por artículo verás{" "}
+          <code>product_key</code> y <code>product_cluster_id</code> cuando existan.
         </p>
       </section>
 
