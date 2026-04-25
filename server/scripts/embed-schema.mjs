@@ -14,7 +14,7 @@ const outPath = path.join(__dirname, "..", "src", "schemaSql.generated.ts");
 function splitSchemaStatements(sql) {
   return sql
     .trim()
-    .split(/(?<=;)\s*(?=(?:CREATE|INSERT|SELECT)\b)/i)
+    .split(/(?<=;)\s*(?=(?:CREATE|INSERT|SELECT|ALTER)\b)/i)
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
 }

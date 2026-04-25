@@ -6,6 +6,15 @@ export function sqlNormTitle(alias: string): string {
 }
 
 /**
+ * Clave de agrupación estable: `product_key` del batch semántico si existe; si no, título normalizado
+ * (mismo criterio que antes).
+ */
+export function sqlProductGroupingKey(alias: string): string {
+  const n = sqlNormTitle(alias);
+  return `COALESCE(NULLIF(trim(${alias}.product_key), ''), ${n})`;
+}
+
+/**
  * Tras `runs_one_per_day`: candidatos por corrida (precio mínimo) y título canónico
  * (moda entre esos ganadores por corrida; desempate por corrida más reciente).
  * $1 = results.search_id (artículo).
@@ -16,7 +25,7 @@ per_run_price_rank AS (
   SELECT
     sr.id AS scrape_run_id,
     sr.executed_at,
-    ${sqlNormTitle("r")} AS norm_title,
+    ${sqlProductGroupingKey("r")} AS norm_title,
     r.title AS raw_title,
     r.price::float8 AS price,
     ROW_NUMBER() OVER (PARTITION BY sr.id ORDER BY r.price ASC NULLS LAST) AS rn
@@ -48,10 +57,10 @@ canonical_norm_title AS (
 
 /** Filtra filas de `alias` al mismo producto que el título canónico; si no hay canónico, no filtra. */
 export function sqlWhereTitleMatchesCanonical(alias: string): string {
-  const n = sqlNormTitle(alias);
+  const gk = sqlProductGroupingKey(alias);
   return `(
   NOT EXISTS (SELECT 1 FROM canonical_norm_title)
-  OR ${n} = (SELECT c.norm_title FROM canonical_norm_title c)
+  OR ${gk} = (SELECT c.norm_title FROM canonical_norm_title c)
 )`;
 }
 

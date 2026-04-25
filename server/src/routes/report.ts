@@ -5,6 +5,7 @@ import { parseProductScopeQuery } from "../productScopeQuery.js";
 import { RUNS_ONE_PER_DAY_CTE } from "../sql/runsOnePerDay.js";
 import {
   CTE_CANONICAL_PRODUCT_TITLE,
+  sqlProductGroupingKey,
   sqlWhereManualProductTitleAndSeller,
   sqlWhereTitleMatchesCanonical,
 } from "../sql/articleSameProductTitle.js";
@@ -40,7 +41,7 @@ const REPORT_PEERS_AUTO = `
              SELECT
                sr2.id AS scrape_run_id,
                sr2.executed_at,
-               trim(both from regexp_replace(lower(coalesce(r2.title, '')), E'\\\\s+', ' ', 'g')) AS norm_title,
+               ${sqlProductGroupingKey("r2")} AS norm_title,
                r2.price,
                ROW_NUMBER() OVER (PARTITION BY sr2.id ORDER BY r2.price ASC NULLS LAST) AS rn
              FROM results r2
@@ -61,7 +62,7 @@ const REPORT_PEERS_AUTO = `
          INNER JOIN results r ON r.search_id = g.id AND r.price IS NOT NULL
          INNER JOIN scrape_runs sr ON sr.id = r.scrape_run_id
          WHERE canon.norm_title IS NULL
-           OR trim(both from regexp_replace(lower(coalesce(r.title, '')), E'\\\\s+', ' ', 'g')) = canon.norm_title
+           OR ${sqlProductGroupingKey("r")} = canon.norm_title
          GROUP BY g.id, sr.id, sr.executed_at
        ),
        per_day AS (

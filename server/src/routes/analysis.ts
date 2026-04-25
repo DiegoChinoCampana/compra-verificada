@@ -1,12 +1,13 @@
 import { Router } from "express";
 import { pool } from "../db.js";
-import { sqlNormTitle } from "../sql/articleSameProductTitle.js";
+import { sqlProductGroupingKey } from "../sql/articleSameProductTitle.js";
 
 export const analysisRouter = Router();
 
 const ALLOWED_DAYS = new Set([10, 30, 60]);
 
-const normTitleExpr = sqlNormTitle("r");
+/** Agrupa series / saltos: COALESCE(product_key, título normalizado). */
+const groupKeyExpr = sqlProductGroupingKey("r");
 
 /**
  * Por nombre de artículo (fichas habilitadas que lo contienen en `articles.article`):
@@ -52,7 +53,7 @@ analysisRouter.get("/price-stability-by-name", async (req, res) => {
     ),
     result_rows AS (
       SELECT
-        ${normTitleExpr} AS title_key,
+        ${groupKeyExpr} AS title_key,
         r.title AS title_raw,
         r.search_id,
         r.price::float8 AS price,
@@ -218,7 +219,7 @@ analysisRouter.get("/price-stability-by-name", async (req, res) => {
       ),
       result_rows AS (
         SELECT
-          ${normTitleExpr} AS title_key,
+          ${groupKeyExpr} AS title_key,
           r.title AS title_raw,
           r.search_id,
           r.price::float8 AS price,
@@ -417,7 +418,7 @@ analysisRouter.get("/price-jumps-by-name", async (req, res) => {
     ),
     result_rows AS (
       SELECT
-        ${normTitleExpr} AS title_key,
+        ${groupKeyExpr} AS title_key,
         r.title AS title_raw,
         r.search_id,
         r.price::float8 AS price,

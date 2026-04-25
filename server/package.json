@@ -10,7 +10,10 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "db:ensure": "tsx scripts/ensure-database.ts",
-    "db:bootstrap-remote": "bash scripts/bootstrap-remote-db.sh"
+    "db:bootstrap-remote": "bash scripts/bootstrap-remote-db.sh",
+    "embed:cluster": "tsx scripts/clusterProducts.ts",
+    "embed:cluster:embed-only": "tsx scripts/clusterProducts.ts --embed-only",
+    "embed:cluster:cluster-only": "tsx scripts/clusterProducts.ts --cluster-only"
   },
   "keywords": [],
   "author": "",

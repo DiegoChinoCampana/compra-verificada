@@ -39,6 +39,19 @@ CREATE TABLE IF NOT EXISTS results(
     free_shipping_applied BOOLEAN
 );
 
+-- Clustering semántico (batch): embeddings + claves de producto. Requiere extensión `vector` en el servidor.
+CREATE EXTENSION IF NOT EXISTS vector;
+
+CREATE TABLE IF NOT EXISTS result_embeddings (
+    result_id BIGINT PRIMARY KEY REFERENCES results(id) ON DELETE CASCADE,
+    embedding vector(1536),
+    updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+ALTER TABLE results ADD COLUMN IF NOT EXISTS product_key TEXT;
+ALTER TABLE results ADD COLUMN IF NOT EXISTS product_cluster_id INTEGER;
+ALTER TABLE results ADD COLUMN IF NOT EXISTS product_confidence NUMERIC;
+
 CREATE TABLE IF NOT EXISTS configs (
     id SERIAL PRIMARY KEY,
     name TEXT,
