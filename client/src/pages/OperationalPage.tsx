@@ -87,8 +87,13 @@ export function OperationalPage() {
         setClusterRunError(res.error);
         return;
       }
+      const r = res.result;
+      const tail =
+        r.embedded === 0 && r.clusteredRows === 0
+          ? " No hubo filas nuevas para embed ni embeddings en la ventana para agrupar (revisá artículo / días o ejecutá solo «embed» primero)."
+          : "";
       setClusterRunOk(
-        `Listo en ${(res.result.durationMs / 1000).toFixed(1)}s · embeddings ${res.result.embedded} · en clúster ${res.result.inCluster} (ruido ${res.result.noise}).`,
+        `Listo en ${(r.durationMs / 1000).toFixed(1)}s · embeddings escritos: ${r.embedded} · filas procesadas en cluster: ${r.clusteredRows} (en clúster: ${r.inCluster}, ruido: ${r.noise}).${tail}`,
       );
       const meta = await fetchJson<ProductClusteringMetaPayload>(
         `/api/analytics/operational/product-clustering-meta`,
@@ -106,8 +111,7 @@ export function OperationalPage() {
   }
 
   const needSecret = Boolean(clusterMeta?.requiresClusterBatchSecret);
-  const submitDisabled =
-    clusterRunning || (needSecret && !clusterSecret.trim()) || clusterArticle.trim().length < 2;
+  const submitDisabled = clusterRunning || (needSecret && !clusterSecret.trim());
 
   return (
     <div>
@@ -138,6 +142,12 @@ export function OperationalPage() {
         )}
 
         <form className="card" style={{ marginTop: "0.75rem", padding: "1rem" }} onSubmit={onRunClustering}>
+          {needSecret && !clusterSecret.trim() ? (
+            <p className="error" style={{ marginBottom: "0.5rem" }}>
+              Ingresá el token para poder ejecutar (mismo valor que <code>CLUSTER_BATCH_SECRET</code> en
+              el servidor).
+            </p>
+          ) : null}
           <div className="field-grid" style={{ gap: "0.75rem" }}>
             <label>
               Texto de artículo (ILIKE)
@@ -146,6 +156,8 @@ export function OperationalPage() {
                 onChange={(e) => setClusterArticle(e.target.value)}
                 placeholder="Ej: Microondas"
                 autoComplete="off"
+                required
+                minLength={2}
               />
             </label>
             <label>
@@ -193,14 +205,19 @@ export function OperationalPage() {
               {clusterRunning ? "Ejecutando…" : "Ejecutar clustering"}
             </button>
           </div>
+          {clusterRunning ? (
+            <p className="warn" style={{ marginTop: "0.75rem", marginBottom: 0 }}>
+              Corriendo en el servidor… puede tardar varios minutos (OpenAI + base de datos). No
+              cierres esta pestaña.
+            </p>
+          ) : null}
+          {clusterRunError ? (
+            <p className="error" style={{ marginTop: "0.75rem", marginBottom: 0 }}>
+              {clusterRunError}
+            </p>
+          ) : null}
+          {clusterRunOk ? <div className="notice-ok">{clusterRunOk}</div> : null}
         </form>
-
-        {clusterRunError ? <p className="error" style={{ marginTop: "0.75rem" }}>{clusterRunError}</p> : null}
-        {clusterRunOk ? (
-          <p className="muted small" style={{ marginTop: "0.75rem" }}>
-            {clusterRunOk}
-          </p>
-        ) : null}
 
         <pre
           className="muted small"

@@ -287,6 +287,16 @@ button:hover {
   color: var(--danger);
 }
 
+.notice-ok {
+  margin-top: 0.75rem;
+  padding: 0.65rem 0.85rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--primary-soft);
+  color: inherit;
+  font-size: 0.95rem;
+}
+
 .warn {
   color: var(--warn);
   font-size: 0.9rem;
