@@ -129,6 +129,13 @@ export function OperationalPage() {
           <code>npm run embed:cluster --prefix server</code>. Hace falta{" "}
           <code>OPENAI_API_KEY</code> en el servidor y Postgres con extensión <code>vector</code>.
         </p>
+        {clusterMeta && clusterMeta.openAiConfigured === false ? (
+          <p className="error" style={{ marginTop: "0.5rem" }}>
+            Este servidor <strong>no tiene</strong> <code>OPENAI_API_KEY</code>: el modo completo o
+            «Solo embeddings» va a fallar hasta que la agregues en <code>server/.env</code> y
+            reinicies la API. Si ya cargaste embeddings antes, podés usar «Solo clustering».
+          </p>
+        ) : null}
         {clusterMeta?.requiresClusterBatchSecret ? (
           <p className="muted small" style={{ marginTop: "0.35rem" }}>
             <strong>Producción / Vercel:</strong> configurá <code>CLUSTER_BATCH_SECRET</code> en las

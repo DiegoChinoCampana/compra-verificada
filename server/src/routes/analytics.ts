@@ -6,6 +6,7 @@ import {
 import { readClusterBatchMeta } from "../clusterBatchMeta.js";
 import { pool } from "../db.js";
 import { runProductClusteringJob } from "../jobs/productClusteringJob.js";
+import { isOpenAiApiKeyConfigured } from "../services/embeddingService.js";
 import { parseProductScopeQuery } from "../productScopeQuery.js";
 import { RUNS_ONE_PER_DAY_CTE } from "../sql/runsOnePerDay.js";
 import {
@@ -372,6 +373,7 @@ analyticsRouter.get("/operational/product-clustering-meta", async (_req, res) =>
       lastRun,
       counts: rows[0] ?? null,
       requiresClusterBatchSecret: clusterBatchRequiresClientSecret(),
+      openAiConfigured: isOpenAiApiKeyConfigured(),
     });
   } catch (e) {
     res.json({
@@ -379,6 +381,7 @@ analyticsRouter.get("/operational/product-clustering-meta", async (_req, res) =>
       counts: null,
       countsError: e instanceof Error ? e.message : String(e),
       requiresClusterBatchSecret: clusterBatchRequiresClientSecret(),
+      openAiConfigured: isOpenAiApiKeyConfigured(),
     });
   }
 });

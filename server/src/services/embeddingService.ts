@@ -32,6 +32,11 @@ function openAiKey(): string | null {
   return k && k.length > 0 ? k : null;
 }
 
+/** Para UI / meta: saber si va a poder embeddear (sin revelar la clave). */
+export function isOpenAiApiKeyConfigured(): boolean {
+  return openAiKey() != null;
+}
+
 type OpenAiEmbeddingResponse = {
   data?: { embedding: number[]; index: number }[];
   error?: { message?: string };
@@ -45,7 +50,7 @@ export async function fetchEmbeddingsBatch(inputs: string[]): Promise<number[][]
   const key = openAiKey();
   if (!key) {
     throw new Error(
-      "[embedding] Falta OPENAI_API_KEY (no se pueden generar embeddings).",
+      "Falta OPENAI_API_KEY: en local agregala en server/.env (junto al resto de variables de la API); en Vercel en Project → Settings → Environment Variables. Sin clave no se pueden generar embeddings. Si ya tenés embeddings en la base, probá el modo «Solo clustering».",
     );
   }
   if (inputs.length === 0) return [];

@@ -118,6 +118,8 @@ export type ScrapedResultListRow = {
 export type ProductClusteringMetaPayload = {
   /** Si hay que enviar `secret` en el POST (Vercel o servidor con `CLUSTER_BATCH_SECRET`). */
   requiresClusterBatchSecret?: boolean;
+  /** Si el proceso de API ve `OPENAI_API_KEY` (embeddings). */
+  openAiConfigured?: boolean;
   lastRun: {
     finishedAt: string;
     article: string;
