@@ -65,6 +65,10 @@ export type ArticleResultRow = {
   official_store_applied: boolean | null;
   free_shipping_required: boolean | null;
   free_shipping_applied: boolean | null;
+  /** Clave de producto semántico (batch); null si aún no hubo clustering para esa fila. */
+  product_key: string | null;
+  product_cluster_id: number | null;
+  product_confidence: number | null;
 };
 
 export type ArticleResultsPagePayload = {
@@ -105,6 +109,32 @@ export type ScrapedResultListRow = {
   created_at: string;
   scrape_run_id: number;
   run_executed_at: string;
+  product_key: string | null;
+  product_cluster_id: number | null;
+  product_confidence: number | null;
+};
+
+/** Respuesta de `/api/analytics/operational/product-clustering-meta`. */
+export type ProductClusteringMetaPayload = {
+  lastRun: {
+    finishedAt: string;
+    article: string;
+    days: number;
+    embedded: number;
+    clusteredRows: number;
+    inCluster: number;
+    noise: number;
+    minSimilarity: number;
+    minPts: number;
+    resetScope: boolean;
+    durationMs: number;
+  } | null;
+  counts: {
+    with_product_key: number;
+    with_embedding: number;
+    total_results: number;
+  } | null;
+  countsError?: string;
 };
 
 export type ScrapedResultsPagePayload = {

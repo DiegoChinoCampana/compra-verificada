@@ -79,7 +79,10 @@ articlesRouter.get("/:id/results", async (req, res) => {
       r.official_store_required,
       r.official_store_applied,
       r.free_shipping_required,
-      r.free_shipping_applied
+      r.free_shipping_applied,
+      r.product_key,
+      r.product_cluster_id,
+      r.product_confidence::float8 AS product_confidence
     FROM results r
     INNER JOIN scrape_runs sr ON sr.id = r.scrape_run_id
     WHERE r.search_id = $1 ${scopeWhere}

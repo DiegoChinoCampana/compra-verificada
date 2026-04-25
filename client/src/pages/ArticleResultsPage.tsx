@@ -13,6 +13,12 @@ function boolLabel(v: boolean | null | undefined): string {
   return "—";
 }
 
+function shortProductKey(s: string | null | undefined): string {
+  if (s == null || !String(s).trim()) return "—";
+  const t = String(s).trim();
+  return t.length > 40 ? `${t.slice(0, 38)}…` : t;
+}
+
 export function ArticleResultsPage() {
   const { id } = useParams();
   const articleId = Number(id);
@@ -128,6 +134,8 @@ export function ArticleResultsPage() {
               <th>Precio</th>
               <th>Rating</th>
               <th>Título</th>
+              <th title="Clave semántica de producto (batch clustering)">product_key</th>
+              <th>Clúst.</th>
               <th>Vendedor</th>
               <th>Rep.</th>
               <th>Capturado</th>
@@ -149,6 +157,10 @@ export function ArticleResultsPage() {
                 </td>
                 <td>{r.rating != null ? r.rating.toFixed(1) : "—"}</td>
                 <td>{r.title ?? "—"}</td>
+                <td className="muted small">{shortProductKey(r.product_key)}</td>
+                <td className="muted small">
+                  {r.product_cluster_id != null ? r.product_cluster_id : "—"}
+                </td>
                 <td>{r.seller ?? "—"}</td>
                 <td>{r.seller_score ?? "—"}</td>
                 <td>{new Date(r.created_at).toLocaleString("es-AR")}</td>

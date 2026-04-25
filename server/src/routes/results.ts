@@ -47,7 +47,10 @@ resultsRouter.get("/", async (req, res) => {
        r.url,
        r.created_at,
        sr.id AS scrape_run_id,
-       sr.executed_at AS run_executed_at
+       sr.executed_at AS run_executed_at,
+       r.product_key,
+       r.product_cluster_id,
+       r.product_confidence::float8 AS product_confidence
      FROM results r
      INNER JOIN articles a ON a.id = r.search_id
      INNER JOIN scrape_runs sr ON sr.id = r.scrape_run_id

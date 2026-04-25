@@ -8,6 +8,12 @@ import type { ScrapedResultListRow, ScrapedResultsPagePayload } from "../types";
 
 const PAGE_SIZE = 50;
 
+function shortProductKey(s: string | null | undefined): string {
+  if (s == null || !String(s).trim()) return "—";
+  const t = String(s).trim();
+  return t.length > 32 ? `${t.slice(0, 30)}…` : t;
+}
+
 function filtersFromParams(p: URLSearchParams) {
   return {
     article: p.get("article") ?? "",
@@ -154,6 +160,8 @@ export function ResultsPage() {
                   <th>Marca</th>
                   <th>Detalle</th>
                   <th>Título</th>
+                  <th title="Clave semántica (batch)">product_key</th>
+                  <th>Clúst.</th>
                   <th>Tienda</th>
                   <th>Precio</th>
                   <th>Corrida</th>
@@ -167,6 +175,10 @@ export function ResultsPage() {
                     <td>{r.brand ?? "—"}</td>
                     <td>{r.detail ?? "—"}</td>
                     <td>{r.title ?? "—"}</td>
+                    <td className="muted small">{shortProductKey(r.product_key)}</td>
+                    <td className="muted small">
+                      {r.product_cluster_id != null ? r.product_cluster_id : "—"}
+                    </td>
                     <td>{r.seller ?? "—"}</td>
                     <td>
                       {r.price != null

@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { fetchJson } from "../api";
-import type { Article } from "../types";
+import type { Article, ProductClusteringMetaPayload } from "../types";
 
 export function OperationalPage() {
   const [stale, setStale] = useState<Article[]>([]);
   const [missing, setMissing] = useState<Article[]>([]);
+  const [clusterMeta, setClusterMeta] = useState<ProductClusteringMetaPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -13,13 +14,17 @@ export function OperationalPage() {
     (async () => {
       setError(null);
       try {
-        const [s, m] = await Promise.all([
+        const [s, m, c] = await Promise.all([
           fetchJson<Article[]>(`/api/analytics/operational/stale-scrapes?days=7`),
           fetchJson<Article[]>(`/api/analytics/operational/missing-recent-results?days=14`),
+          fetchJson<ProductClusteringMetaPayload>(
+            `/api/analytics/operational/product-clustering-meta`,
+          ),
         ]);
         if (!cancelled) {
           setStale(s);
           setMissing(m);
+          setClusterMeta(c);
         }
       } catch (e) {
         if (!cancelled) setError(String(e));
@@ -41,6 +46,67 @@ export function OperationalPage() {
         Señales para administración: artículos con scrape desactualizado y artículos sin
         resultados recientes en la base.
       </p>
+
+      <section className="card block">
+        <h2>Clustering semántico (product_key)</h2>
+        <p className="muted small">
+          El batch <strong>no corre solo</strong>: hay que ejecutarlo en la máquina donde está el
+          código y las variables <code>OPENAI_API_KEY</code> / Postgres. Al terminar bien, se
+          guarda un resumen en la base; acá ves la última corrida y cuántas filas tienen clave /
+          embedding.
+        </p>
+        <pre
+          className="muted small"
+          style={{
+            marginTop: "0.5rem",
+            padding: "0.75rem",
+            background: "rgba(0,0,0,0.05)",
+            borderRadius: 6,
+            overflow: "auto",
+          }}
+        >
+          cd server{"\n"}
+          npm run embed:cluster -- --article=Microondas --days=60
+        </pre>
+        {clusterMeta?.countsError ? (
+          <p className="error" style={{ marginTop: "0.75rem" }}>
+            Conteos no disponibles: {clusterMeta.countsError}
+          </p>
+        ) : clusterMeta?.counts ? (
+          <ul className="muted small" style={{ marginTop: "0.75rem" }}>
+            <li>
+              Resultados con <code>product_key</code>:{" "}
+              <strong>{clusterMeta.counts.with_product_key}</strong> /{" "}
+              {clusterMeta.counts.total_results} totales
+            </li>
+            <li>
+              Filas en <code>result_embeddings</code>:{" "}
+              <strong>{clusterMeta.counts.with_embedding}</strong>
+            </li>
+          </ul>
+        ) : null}
+        {clusterMeta?.lastRun ? (
+          <p className="muted small" style={{ marginTop: "0.75rem" }}>
+            <strong>Última corrida:</strong>{" "}
+            {new Date(clusterMeta.lastRun.finishedAt).toLocaleString("es-AR")} · artículo ILIKE «
+            {clusterMeta.lastRun.article}» · ventana {clusterMeta.lastRun.days} días · embeddings{" "}
+            {clusterMeta.lastRun.embedded} · filas agrupadas {clusterMeta.lastRun.clusteredRows}{" "}
+            (en clúster {clusterMeta.lastRun.inCluster}, ruido {clusterMeta.lastRun.noise}) · sim ≥{" "}
+            {clusterMeta.lastRun.minSimilarity} · minPts {clusterMeta.lastRun.minPts}
+            {clusterMeta.lastRun.resetScope ? " · con reset" : ""} ·{" "}
+            {(clusterMeta.lastRun.durationMs / 1000).toFixed(1)}s
+          </p>
+        ) : (
+          <p className="muted small" style={{ marginTop: "0.75rem" }}>
+            Todavía no hay registro de una corrida exitosa del script (o la fila de config id 100
+            no existe).
+          </p>
+        )}
+        <p className="muted small" style={{ marginTop: "0.5rem" }}>
+          En <Link to="/resultados">Resultados</Link> y en los listados por artículo verás las
+          columnas <code>product_key</code> y <code>product_cluster_id</code> cuando existan.
+        </p>
+      </section>
 
       <section className="card block">
         <h2>Scrapes viejos (habilitados, +7 días sin scrape o sin fecha)</h2>

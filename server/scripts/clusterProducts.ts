@@ -11,6 +11,7 @@
 import dotenv from "dotenv";
 import path from "path";
 import { fileURLToPath } from "url";
+import { writeClusterBatchMeta } from "../src/clusterBatchMeta.js";
 import { pool } from "../src/db.js";
 import {
   fetchEmbeddingsBatch,
@@ -119,13 +120,14 @@ async function runEmbed(opts: {
   days: number;
   limit: number;
   batchSize: number;
-}): Promise<void> {
+}): Promise<number> {
   const missing = await fetchResultsMissingEmbeddings(pool, {
     articleIlike: opts.article,
     days: opts.days,
     limit: opts.limit,
   });
   console.log(`[embed] pendientes: ${missing.length} (article ~ ${opts.article}, ${opts.days} días)`);
+  let done = 0;
   for (let i = 0; i < missing.length; i += opts.batchSize) {
     const chunk = missing.slice(i, i + opts.batchSize);
     const texts = chunk.map((r) => normalizeTitleForEmbedding(r.title));
@@ -133,9 +135,13 @@ async function runEmbed(opts: {
     for (let k = 0; k < chunk.length; k++) {
       await upsertResultEmbedding(pool, chunk[k]!.id, vectors[k]!);
     }
-    console.log(`[embed] guardados ${Math.min(i + opts.batchSize, missing.length)} / ${missing.length}`);
+    done += chunk.length;
+    console.log(`[embed] guardados ${done} / ${missing.length}`);
   }
+  return done;
 }
+
+type ClusterRunStats = { clusteredRows: number; inCluster: number; noise: number };
 
 async function runCluster(opts: {
   article: string;
@@ -144,7 +150,7 @@ async function runCluster(opts: {
   minSimilarity: number;
   minPts: number;
   resetScope: boolean;
-}): Promise<void> {
+}): Promise<ClusterRunStats> {
   const eps = 1 - opts.minSimilarity;
   const pattern = `%${opts.article}%`;
 
@@ -166,7 +172,7 @@ async function runCluster(opts: {
 
   if (rows.length === 0) {
     console.log("[cluster] sin filas con embedding en el universo; ejecutá --embed o ampliá ventana.");
-    return;
+    return { clusteredRows: 0, inCluster: 0, noise: 0 };
   }
 
   const points: number[][] = [];
@@ -182,7 +188,7 @@ async function runCluster(opts: {
   }
   if (points.length < opts.minPts) {
     console.log(`[cluster] muy pocas filas (${points.length}) < minPts=${opts.minPts}, abort.`);
-    return;
+    return { clusteredRows: 0, inCluster: 0, noise: 0 };
   }
 
   if (opts.resetScope) {
@@ -229,11 +235,12 @@ async function runCluster(opts: {
     client.release();
   }
 
-  const clustered = labels.filter((l) => l >= 0).length;
+  const inCluster = labels.filter((l) => l >= 0).length;
   const noise = labels.filter((l) => l === -1).length;
   console.log(
-    `[cluster] listo: ${ids.length} filas, eps(dist)=${eps.toFixed(3)} (sim≥${opts.minSimilarity}), minPts=${opts.minPts}, en_cluster=${clustered}, ruido=${noise}`,
+    `[cluster] listo: ${ids.length} filas, eps(dist)=${eps.toFixed(3)} (sim≥${opts.minSimilarity}), minPts=${opts.minPts}, en_cluster=${inCluster}, ruido=${noise}`,
   );
+  return { clusteredRows: ids.length, inCluster, noise };
 }
 
 async function main(): Promise<void> {
@@ -256,12 +263,15 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
+  const t0 = Date.now();
+  let embedded = 0;
+  let clusterStats: ClusterRunStats = { clusteredRows: 0, inCluster: 0, noise: 0 };
   try {
     if (!clusterOnly) {
-      await runEmbed({ article, days, limit, batchSize });
+      embedded = await runEmbed({ article, days, limit, batchSize });
     }
     if (!embedOnly) {
-      await runCluster({
+      clusterStats = await runCluster({
         article,
         days,
         limit,
@@ -270,6 +280,20 @@ async function main(): Promise<void> {
         resetScope,
       });
     }
+    await writeClusterBatchMeta(pool, {
+      finishedAt: new Date().toISOString(),
+      article,
+      days,
+      embedded,
+      clusteredRows: clusterStats.clusteredRows,
+      inCluster: clusterStats.inCluster,
+      noise: clusterStats.noise,
+      minSimilarity,
+      minPts,
+      resetScope,
+      durationMs: Date.now() - t0,
+    });
+    console.log("[batch] meta guardada en configs id=100 (véase Operación → clustering en la web).");
   } finally {
     await pool.end();
   }

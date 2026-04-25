@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { readClusterBatchMeta } from "../clusterBatchMeta.js";
 import { pool } from "../db.js";
 import { parseProductScopeQuery } from "../productScopeQuery.js";
 import { RUNS_ONE_PER_DAY_CTE } from "../sql/runsOnePerDay.js";
@@ -345,6 +346,31 @@ analyticsRouter.get("/operational/missing-recent-results", async (req, res) => {
   `;
   const { rows } = await pool.query(sql, [days]);
   res.json(rows);
+});
+
+/** Última corrida del script `clusterProducts.ts` + conteos (para pantalla Operación). */
+analyticsRouter.get("/operational/product-clustering-meta", async (_req, res) => {
+  const lastRun = await readClusterBatchMeta(pool);
+  try {
+    const { rows } = await pool.query<{
+      with_product_key: number;
+      with_embedding: number;
+      total_results: number;
+    }>(`
+      SELECT
+        (SELECT COUNT(*)::int FROM results r
+         WHERE r.product_key IS NOT NULL AND length(trim(r.product_key)) > 0) AS with_product_key,
+        (SELECT COUNT(*)::int FROM result_embeddings) AS with_embedding,
+        (SELECT COUNT(*)::int FROM results) AS total_results
+    `);
+    res.json({ lastRun, counts: rows[0] ?? null });
+  } catch (e) {
+    res.json({
+      lastRun,
+      counts: null,
+      countsError: e instanceof Error ? e.message : String(e),
+    });
+  }
 });
 
 const PEERS_AUTO_SQL = `
