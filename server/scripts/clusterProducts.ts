@@ -5,6 +5,7 @@
  *   npx tsx scripts/clusterProducts.ts --article=Microondas --days=60
  *   npx tsx scripts/clusterProducts.ts --article=Colchón --days=30 --embed-only
  *   npx tsx scripts/clusterProducts.ts --article=TV --days=45 --cluster-only --similarity=0.9 --min-pts=2
+ *   npx tsx scripts/clusterProducts.ts --article=Microondas --days=90 --cluster-only --reset-article-window
  *
  * Requiere: PostgreSQL con extensión `vector`, OPENAI_API_KEY, columnas aplicadas (ensureSchema / schema.sql).
  */
@@ -41,6 +42,7 @@ async function main(): Promise<void> {
   const embedOnly = hasFlag("embed-only");
   const clusterOnly = hasFlag("cluster-only");
   const resetScope = hasFlag("reset-scope");
+  const resetArticleWindow = hasFlag("reset-article-window");
 
   if (embedOnly && clusterOnly) {
     console.error("No usar --embed-only y --cluster-only a la vez.");
@@ -58,6 +60,7 @@ async function main(): Promise<void> {
       embedOnly,
       clusterOnly,
       resetScope,
+      resetArticleWindow,
     });
     console.log("[batch] listo (meta en configs id=100; también desde Operación en la web).");
   } finally {

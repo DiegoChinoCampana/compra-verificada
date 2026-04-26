@@ -21,6 +21,8 @@ export type ProductClusteringJobInput = {
   skipCentroidMerge?: boolean;
   embedOnly?: boolean;
   clusterOnly?: boolean;
+  /** Si true, borra product_key de todas las filas del artículo (ILIKE) en la ventana de días antes de DBSCAN. */
+  resetArticleWindow?: boolean;
   resetScope?: boolean;
 };
 
@@ -230,12 +232,35 @@ async function runCluster(
     minSimilarity: number;
     minPts: number;
     resetScope: boolean;
+    resetArticleWindow: boolean;
     skipCentroidMerge: boolean;
     centroidMergeMinSimilarity: number;
   },
 ): Promise<ClusterRunStats> {
   const eps = 1 - opts.minSimilarity;
   const pattern = `%${opts.article}%`;
+
+  if (opts.resetArticleWindow) {
+    const { rowCount } = await pool.query(
+      `
+      UPDATE results r
+      SET product_key = NULL,
+          product_cluster_id = NULL,
+          product_confidence = NULL
+      FROM scrape_runs sr,
+           articles a
+      WHERE r.scrape_run_id = sr.id
+        AND r.search_id = a.id
+        AND a.enabled = TRUE
+        AND a.article ILIKE $1
+        AND sr.executed_at >= NOW() - ($2::int * interval '1 day')
+      `,
+      [pattern, opts.days],
+    );
+    console.log(
+      `[cluster] reset amplio (artículo+ventana): ${rowCount ?? 0} filas sin product_key antes de reagrupar.`,
+    );
+  }
 
   const { rows } = await pool.query<{ id: number; emb_text: string }>(
     `
@@ -354,6 +379,7 @@ function normalizeJobInput(raw: ProductClusteringJobInput): Required<
     skipCentroidMerge,
     embedOnly: Boolean(raw.embedOnly),
     clusterOnly: Boolean(raw.clusterOnly),
+    resetArticleWindow: Boolean(raw.resetArticleWindow),
     resetScope: Boolean(raw.resetScope),
   };
 }
@@ -394,6 +420,7 @@ export async function runProductClusteringJob(
       minSimilarity: opts.minSimilarity,
       minPts: opts.minPts,
       resetScope: opts.resetScope,
+      resetArticleWindow: opts.resetArticleWindow,
       skipCentroidMerge: opts.skipCentroidMerge,
       centroidMergeMinSimilarity: opts.centroidMergeMinSimilarity,
     });
@@ -411,6 +438,7 @@ export async function runProductClusteringJob(
     minPts: opts.minPts,
     centroidMergeMinSimilarity: opts.centroidMergeMinSimilarity,
     skipCentroidMerge: opts.skipCentroidMerge,
+    resetArticleWindow: opts.resetArticleWindow,
     resetScope: opts.resetScope,
     durationMs: Date.now() - t0,
   };

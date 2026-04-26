@@ -398,6 +398,7 @@ type ClusterRunBody = {
   skipCentroidMerge?: unknown;
   embedOnly?: unknown;
   clusterOnly?: unknown;
+  resetArticleWindow?: unknown;
   resetScope?: unknown;
 };
 
@@ -435,6 +436,7 @@ analyticsRouter.post("/operational/product-clustering-run", async (req, res) => 
             : undefined,
       embedOnly: body.embedOnly === true,
       clusterOnly: body.clusterOnly === true,
+      resetArticleWindow: body.resetArticleWindow === true,
       resetScope: body.resetScope === true,
     });
     res.json({ ok: true as const, result: payload });

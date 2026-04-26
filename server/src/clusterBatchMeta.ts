@@ -18,6 +18,8 @@ export type ClusterBatchMetaPayload = {
   centroidMergeMinSimilarity?: number;
   /** Si true, no se aplica la fusión por centroides. */
   skipCentroidMerge?: boolean;
+  /** Si true, se limpiaron claves en todo el artículo+ventana antes de agrupar. */
+  resetArticleWindow?: boolean;
   resetScope: boolean;
   durationMs: number;
 };

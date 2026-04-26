@@ -21,6 +21,7 @@ export function OperationalPage() {
   const [clusterDays, setClusterDays] = useState(60);
   const [clusterSecret, setClusterSecret] = useState("");
   const [clusterMode, setClusterMode] = useState<"full" | "embed" | "cluster">("full");
+  const [clusterResetArticleWindow, setClusterResetArticleWindow] = useState(false);
   const [clusterReset, setClusterReset] = useState(false);
   const [clusterMinSimilarity, setClusterMinSimilarity] = useState(0.9);
   const [clusterMinPts, setClusterMinPts] = useState(2);
@@ -82,6 +83,7 @@ export function OperationalPage() {
       const body: Record<string, unknown> = {
         article,
         days: clusterDays,
+        resetArticleWindow: clusterResetArticleWindow,
         resetScope: clusterReset,
         embedOnly: clusterMode === "embed",
         clusterOnly: clusterMode === "cluster",
@@ -229,13 +231,35 @@ export function OperationalPage() {
                 quedaban listados con título pendientes de vector (no indica fallo).
               </span>
             </label>
-            <label style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-              <input
-                type="checkbox"
-                checked={clusterReset}
-                onChange={(e) => setClusterReset(e.target.checked)}
-              />
-              Resetear claves en el universo antes de agrupar
+            <label style={{ display: "flex", flexDirection: "column", gap: "0.35rem" }}>
+              <span style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                <input
+                  type="checkbox"
+                  checked={clusterResetArticleWindow}
+                  onChange={(e) => setClusterResetArticleWindow(e.target.checked)}
+                />
+                Borrar <code>product_key</code> en <strong>todo</strong> el artículo + ventana (días)
+                antes de reagrupar
+              </span>
+              <span className="muted small" style={{ paddingLeft: "1.5rem" }}>
+                Quita claves viejas o malas también en filas <strong>sin</strong> embedding o que no
+                entran en el límite de filas del batch. Después solo recuperan clave las filas con
+                vector que el algoritmo agrupa (modo «Solo clustering» o paso cluster del completo).
+              </span>
+            </label>
+            <label style={{ display: "flex", flexDirection: "column", gap: "0.35rem" }}>
+              <span style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                <input
+                  type="checkbox"
+                  checked={clusterReset}
+                  onChange={(e) => setClusterReset(e.target.checked)}
+                />
+                Resetear claves solo en el lote con embedding (antes de DBSCAN)
+              </span>
+              <span className="muted small" style={{ paddingLeft: "1.5rem" }}>
+                Afecta únicamente las filas que entran al clustering con límite; el resto del artículo
+                no se modifica. Si marcás la opción de arriba, esta suele ser redundante.
+              </span>
             </label>
             <label>
               Similitud mín. vecinos (DBSCAN)
@@ -385,7 +409,8 @@ export function OperationalPage() {
             {clusterMeta.lastRun.embedded} · filas agrupadas {clusterMeta.lastRun.clusteredRows}{" "}
             (en clúster {clusterMeta.lastRun.inCluster}, ruido {clusterMeta.lastRun.noise}) · sim ≥{" "}
             {clusterMeta.lastRun.minSimilarity} · minPts {clusterMeta.lastRun.minPts}
-            {clusterMeta.lastRun.resetScope ? " · con reset" : ""}
+            {clusterMeta.lastRun.resetArticleWindow ? " · reset amplio (artículo+ventana)" : ""}
+            {clusterMeta.lastRun.resetScope ? " · reset lote" : ""}
             {clusterMeta.lastRun.skipCentroidMerge
               ? " · sin fusión centroides"
               : clusterMeta.lastRun.centroidMergeMinSimilarity != null
