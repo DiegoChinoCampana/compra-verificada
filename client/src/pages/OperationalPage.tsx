@@ -140,6 +140,9 @@ export function OperationalPage() {
           botón (misma lógica que el script) o la terminal con{" "}
           <code>npm run embed:cluster --prefix server</code>. Hace falta{" "}
           <code>OPENAI_API_KEY</code> en el servidor y Postgres con extensión <code>vector</code>.
+          Tras un <code>git pull</code> o cambios en <code>server/.env</code>, reiniciá el proceso del
+          API (desde la raíz del repo: <code>npm run dev</code> levanta web + API; el servidor usa{" "}
+          <code>tsx watch</code> y suele recargar solo al guardar archivos en <code>server/</code>).
         </p>
         {clusterMeta && clusterMeta.openAiConfigured === false ? (
           <p className="error" style={{ marginTop: "0.5rem" }}>
@@ -150,8 +153,10 @@ export function OperationalPage() {
         ) : null}
         {clusterMeta?.requiresClusterBatchSecret ? (
           <p className="muted small" style={{ marginTop: "0.35rem" }}>
-            <strong>Producción / Vercel:</strong> configurá <code>CLUSTER_BATCH_SECRET</code> en las
-            variables de entorno e ingresá el mismo valor abajo como token (no viaja por URL).
+            <strong>Token obligatorio:</strong> en Vercel hay que definir{" "}
+            <code>CLUSTER_BATCH_SECRET</code> en el proyecto; en local también si lo pusiste en{" "}
+            <code>server/.env</code>. Ingresá el mismo valor abajo (no viaja por URL). Si el token
+            está vacío, el botón «Ejecutar» queda deshabilitado y parece que no pasa nada.
           </p>
         ) : (
           <p className="muted small" style={{ marginTop: "0.35rem" }}>
@@ -290,7 +295,17 @@ export function OperationalPage() {
             </label>
           </div>
           <div className="form-actions" style={{ marginTop: "0.75rem" }}>
-            <button type="submit" disabled={submitDisabled}>
+            <button
+              type="submit"
+              disabled={submitDisabled}
+              title={
+                clusterRunning
+                  ? "Corrida en curso en el servidor…"
+                  : needSecret && !clusterSecret.trim()
+                    ? "Completá el token (mismo valor que CLUSTER_BATCH_SECRET en el servidor)"
+                    : undefined
+              }
+            >
               {clusterRunning ? "Ejecutando…" : "Ejecutar clustering"}
             </button>
           </div>
