@@ -1,8 +1,11 @@
+import path from "path";
+import { fileURLToPath } from "url";
 import pg from "pg";
 import dotenv from "dotenv";
 import { IPC_SCHEMA_STATEMENTS } from "./schemaSql.generated.js";
 
-dotenv.config();
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+dotenv.config({ path: path.join(__dirname, "..", ".env") });
 
 const { Pool } = pg;
 

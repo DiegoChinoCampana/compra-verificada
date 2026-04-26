@@ -3,6 +3,8 @@
   "private": true,
   "scripts": {
     "setup": "npm install && npm install --prefix server && npm install --prefix client",
+    "prepare:local": "node scripts/prepare-local.mjs",
+    "dev:local": "npm run prepare:local && npm run dev",
     "db:ensure": "npm run db:ensure --prefix server",
     "db:bootstrap-remote": "npm run db:bootstrap-remote --prefix server",
     "dev": "concurrently -n api,web -c blue,green \"npm run dev --prefix server\" \"npm run dev --prefix client\"",
