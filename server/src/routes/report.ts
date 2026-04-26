@@ -1,13 +1,18 @@
 import { Router } from "express";
 import { pool } from "../db.js";
 import { buildRecommendation } from "../recommendation.js";
-import { parseProductScopeQuery } from "../productScopeQuery.js";
+import {
+  parseProductScopeQuery,
+  productScopeMode,
+  scopeParamsAfterArticleId,
+  sqlWhereProductScope,
+} from "../productScopeQuery.js";
 import { RUNS_ONE_PER_DAY_CTE } from "../sql/runsOnePerDay.js";
 import {
   CTE_CANONICAL_PRODUCT_TITLE,
   sqlProductGroupingKey,
   sqlWhereManualProductTitleAndSeller,
-  sqlWhereTitleMatchesCanonical,
+  sqlWhereProductKey,
 } from "../sql/articleSameProductTitle.js";
 
 export const reportRouter = Router();
@@ -118,6 +123,40 @@ const REPORT_PEERS_MANUAL = `
        LEFT JOIN latest l ON l.article_id = g.id
        ORDER BY l.min_p ASC NULLS LAST, g.brand ASC NULLS LAST`;
 
+const REPORT_PEERS_KEY = `
+       WITH grp AS (
+         SELECT id, article, brand, detail, enabled
+         FROM articles
+         WHERE lower(trim(article)) = lower(trim($1::text))
+           AND lower(trim(coalesce(detail, ''))) = lower(trim(coalesce($2::text, '')))
+       ),
+       per_article_run AS (
+         SELECT g.id AS article_id, sr.id AS run_id, sr.executed_at, MIN(r.price) AS min_p
+         FROM grp g
+         INNER JOIN results r ON r.search_id = g.id AND r.price IS NOT NULL
+         INNER JOIN scrape_runs sr ON sr.id = r.scrape_run_id
+         WHERE ${sqlWhereProductKey("r", 3)}
+         GROUP BY g.id, sr.id, sr.executed_at
+       ),
+       per_day AS (
+         SELECT DISTINCT ON (p.article_id, date_trunc('day', p.executed_at))
+           p.article_id,
+           p.executed_at,
+           p.min_p
+         FROM per_article_run p
+         ORDER BY p.article_id, date_trunc('day', p.executed_at), p.executed_at DESC
+       ),
+       latest AS (
+         SELECT DISTINCT ON (article_id) article_id, executed_at, min_p
+         FROM per_day
+         ORDER BY article_id, executed_at DESC
+       )
+       SELECT g.id, g.article, g.brand, g.detail, g.enabled,
+              l.min_p::float8 AS latest_run_min_price, l.executed_at AS latest_run_at
+       FROM grp g
+       LEFT JOIN latest l ON l.article_id = g.id
+       ORDER BY l.min_p ASC NULLS LAST, g.brand ASC NULLS LAST`;
+
 reportRouter.get("/article/:articleId", async (req, res) => {
   const articleId = parseId(req.params.articleId);
   if (articleId == null) {
@@ -126,10 +165,11 @@ reportRouter.get("/article/:articleId", async (req, res) => {
   }
 
   const pq = parseProductScopeQuery(req);
-  const mfR = sqlWhereManualProductTitleAndSeller("r", 2, 3);
-  const afR = sqlWhereTitleMatchesCanonical("r");
-  const mfRes = sqlWhereManualProductTitleAndSeller("results", 2, 3);
-  const afRes = sqlWhereTitleMatchesCanonical("results");
+  const mode = productScopeMode(pq);
+  const useCte = mode === "canonical";
+  const wfR = sqlWhereProductScope(pq, "r", { title: 2, seller: 3, key: 2 });
+  const wfRes = sqlWhereProductScope(pq, "results", { title: 2, seller: 3, key: 2 });
+  const scopeParams = scopeParamsAfterArticleId(pq);
 
   const articleRes = await pool.query(
     `SELECT id, article, brand, detail, enabled, created_at, last_scraped_at, ordered_by,
@@ -153,20 +193,8 @@ reportRouter.get("/article/:articleId", async (req, res) => {
     scopeRow,
   ] = await Promise.all([
     pool.query(
-      pq.manual
+      useCte
         ? `WITH
-       ${RUNS_ONE_PER_DAY_CTE.trim()}
-       SELECT sr.id AS scrape_run_id, sr.executed_at,
-              MIN(r.price)::float8 AS min_price,
-              AVG(r.price)::float8 AS avg_price,
-              COUNT(*)::int AS listing_count
-       FROM results r
-       JOIN scrape_runs sr ON sr.id = r.scrape_run_id
-       JOIN runs_one_per_day d ON d.scrape_run_id = sr.id
-       WHERE r.search_id = $1 AND r.price IS NOT NULL AND ${mfR}
-       GROUP BY sr.id, sr.executed_at
-       ORDER BY sr.executed_at ASC`
-        : `WITH
        ${CTE_CANONICAL_PRODUCT_TITLE.trim()}
        SELECT sr.id AS scrape_run_id, sr.executed_at,
               MIN(r.price)::float8 AS min_price,
@@ -175,27 +203,26 @@ reportRouter.get("/article/:articleId", async (req, res) => {
        FROM results r
        JOIN scrape_runs sr ON sr.id = r.scrape_run_id
        JOIN runs_one_per_day d ON d.scrape_run_id = sr.id
-       WHERE r.search_id = $1 AND r.price IS NOT NULL AND ${afR}
+       WHERE r.search_id = $1 AND r.price IS NOT NULL AND ${wfR}
+       GROUP BY sr.id, sr.executed_at
+       ORDER BY sr.executed_at ASC`
+        : `WITH
+       ${RUNS_ONE_PER_DAY_CTE.trim()}
+       SELECT sr.id AS scrape_run_id, sr.executed_at,
+              MIN(r.price)::float8 AS min_price,
+              AVG(r.price)::float8 AS avg_price,
+              COUNT(*)::int AS listing_count
+       FROM results r
+       JOIN scrape_runs sr ON sr.id = r.scrape_run_id
+       JOIN runs_one_per_day d ON d.scrape_run_id = sr.id
+       WHERE r.search_id = $1 AND r.price IS NOT NULL AND ${wfR}
        GROUP BY sr.id, sr.executed_at
        ORDER BY sr.executed_at ASC`,
-      pq.manual ? [articleId, pq.productTitle, pq.sellerOrNull] : [articleId],
+      [articleId, ...scopeParams],
     ),
     pool.query(
-      pq.manual
+      useCte
         ? `WITH
-       ${RUNS_ONE_PER_DAY_CTE.trim()},
-       ranked AS (
-         SELECT sr.id AS scrape_run_id, sr.executed_at, r.title,
-                r.price::float8 AS price, r.url, r.seller, r.rating::float8 AS rating,
-                ROW_NUMBER() OVER (PARTITION BY sr.id ORDER BY r.price ASC NULLS LAST) AS rn
-         FROM results r
-         JOIN scrape_runs sr ON sr.id = r.scrape_run_id
-         JOIN runs_one_per_day d ON d.scrape_run_id = sr.id
-         WHERE r.search_id = $1 AND r.price IS NOT NULL AND ${mfR}
-       )
-       SELECT scrape_run_id, executed_at, title, price, url, seller, rating
-       FROM ranked WHERE rn = 1 ORDER BY executed_at ASC`
-        : `WITH
        ${CTE_CANONICAL_PRODUCT_TITLE.trim()},
        ranked AS (
          SELECT sr.id AS scrape_run_id, sr.executed_at, r.title,
@@ -204,15 +231,42 @@ reportRouter.get("/article/:articleId", async (req, res) => {
          FROM results r
          JOIN scrape_runs sr ON sr.id = r.scrape_run_id
          JOIN runs_one_per_day d ON d.scrape_run_id = sr.id
-         WHERE r.search_id = $1 AND r.price IS NOT NULL AND ${afR}
+         WHERE r.search_id = $1 AND r.price IS NOT NULL AND ${wfR}
+       )
+       SELECT scrape_run_id, executed_at, title, price, url, seller, rating
+       FROM ranked WHERE rn = 1 ORDER BY executed_at ASC`
+        : `WITH
+       ${RUNS_ONE_PER_DAY_CTE.trim()},
+       ranked AS (
+         SELECT sr.id AS scrape_run_id, sr.executed_at, r.title,
+                r.price::float8 AS price, r.url, r.seller, r.rating::float8 AS rating,
+                ROW_NUMBER() OVER (PARTITION BY sr.id ORDER BY r.price ASC NULLS LAST) AS rn
+         FROM results r
+         JOIN scrape_runs sr ON sr.id = r.scrape_run_id
+         JOIN runs_one_per_day d ON d.scrape_run_id = sr.id
+         WHERE r.search_id = $1 AND r.price IS NOT NULL AND ${wfR}
        )
        SELECT scrape_run_id, executed_at, title, price, url, seller, rating
        FROM ranked WHERE rn = 1 ORDER BY executed_at ASC`,
-      pq.manual ? [articleId, pq.productTitle, pq.sellerOrNull] : [articleId],
+      [articleId, ...scopeParams],
     ),
     pool.query(
-      pq.manual
+      useCte
         ? `WITH
+       ${CTE_CANONICAL_PRODUCT_TITLE.trim()}
+       SELECT sr.id AS scrape_run_id, sr.executed_at,
+              MIN(r.price)::float8 AS min_price,
+              MAX(r.price)::float8 AS max_price,
+              AVG(r.price)::float8 AS avg_price,
+              STDDEV_POP(r.price)::float8 AS stddev_pop,
+              COUNT(*)::int AS listing_count
+       FROM results r
+       JOIN scrape_runs sr ON sr.id = r.scrape_run_id
+       JOIN runs_one_per_day d ON d.scrape_run_id = sr.id
+       WHERE r.search_id = $1 AND r.price IS NOT NULL AND ${wfR}
+       GROUP BY sr.id, sr.executed_at
+       ORDER BY sr.executed_at ASC`
+        : `WITH
        ${RUNS_ONE_PER_DAY_CTE.trim()}
        SELECT sr.id AS scrape_run_id, sr.executed_at,
               MIN(r.price)::float8 AS min_price,
@@ -223,39 +277,14 @@ reportRouter.get("/article/:articleId", async (req, res) => {
        FROM results r
        JOIN scrape_runs sr ON sr.id = r.scrape_run_id
        JOIN runs_one_per_day d ON d.scrape_run_id = sr.id
-       WHERE r.search_id = $1 AND r.price IS NOT NULL AND ${mfR}
-       GROUP BY sr.id, sr.executed_at
-       ORDER BY sr.executed_at ASC`
-        : `WITH
-       ${CTE_CANONICAL_PRODUCT_TITLE.trim()}
-       SELECT sr.id AS scrape_run_id, sr.executed_at,
-              MIN(r.price)::float8 AS min_price,
-              MAX(r.price)::float8 AS max_price,
-              AVG(r.price)::float8 AS avg_price,
-              STDDEV_POP(r.price)::float8 AS stddev_pop,
-              COUNT(*)::int AS listing_count
-       FROM results r
-       JOIN scrape_runs sr ON sr.id = r.scrape_run_id
-       JOIN runs_one_per_day d ON d.scrape_run_id = sr.id
-       WHERE r.search_id = $1 AND r.price IS NOT NULL AND ${afR}
+       WHERE r.search_id = $1 AND r.price IS NOT NULL AND ${wfR}
        GROUP BY sr.id, sr.executed_at
        ORDER BY sr.executed_at ASC`,
-      pq.manual ? [articleId, pq.productTitle, pq.sellerOrNull] : [articleId],
+      [articleId, ...scopeParams],
     ),
     pool.query(
-      pq.manual
-        ? `SELECT COALESCE(NULLIF(TRIM(results.seller), ''), '(sin vendedor)') AS seller,
-              COUNT(*)::int AS listing_count,
-              AVG(results.rating)::float8 AS avg_rating,
-              MIN(results.price)::float8 AS min_price_seen,
-              MAX(results.created_at) AS last_seen_at
-       FROM results
-       WHERE results.search_id = $1 AND results.created_at > NOW() - interval '90 days'
-         AND ${mfRes}
-       GROUP BY 1
-       ORDER BY listing_count DESC
-       LIMIT 15`
-        : `WITH
+      useCte
+        ? `WITH
        ${CTE_CANONICAL_PRODUCT_TITLE.trim()}
        SELECT COALESCE(NULLIF(TRIM(results.seller), ''), '(sin vendedor)') AS seller,
               COUNT(*)::int AS listing_count,
@@ -264,22 +293,26 @@ reportRouter.get("/article/:articleId", async (req, res) => {
               MAX(results.created_at) AS last_seen_at
        FROM results
        WHERE results.search_id = $1 AND results.created_at > NOW() - interval '90 days'
-         AND ${afRes}
+         AND ${wfRes}
+       GROUP BY 1
+       ORDER BY listing_count DESC
+       LIMIT 15`
+        : `SELECT COALESCE(NULLIF(TRIM(results.seller), ''), '(sin vendedor)') AS seller,
+              COUNT(*)::int AS listing_count,
+              AVG(results.rating)::float8 AS avg_rating,
+              MIN(results.price)::float8 AS min_price_seen,
+              MAX(results.created_at) AS last_seen_at
+       FROM results
+       WHERE results.search_id = $1 AND results.created_at > NOW() - interval '90 days'
+         AND ${wfRes}
        GROUP BY 1
        ORDER BY listing_count DESC
        LIMIT 15`,
-      pq.manual ? [articleId, pq.productTitle, pq.sellerOrNull] : [articleId],
+      [articleId, ...scopeParams],
     ),
     pool.query(
-      pq.manual
-        ? `SELECT COUNT(*)::int AS total_results,
-              COUNT(*) FILTER (WHERE results.official_store_required IS TRUE)::int AS required_official_count,
-              COUNT(*) FILTER (WHERE results.official_store_required IS TRUE AND results.official_store_applied IS TRUE)::int AS official_met_count,
-              COUNT(*) FILTER (WHERE results.free_shipping_required IS TRUE)::int AS required_free_ship_count,
-              COUNT(*) FILTER (WHERE results.free_shipping_required IS TRUE AND results.free_shipping_applied IS TRUE)::int AS free_ship_met_count
-       FROM results
-       WHERE results.search_id = $1 AND ${mfRes}`
-        : `WITH
+      useCte
+        ? `WITH
        ${CTE_CANONICAL_PRODUCT_TITLE.trim()}
        SELECT COUNT(*)::int AS total_results,
               COUNT(*) FILTER (WHERE results.official_store_required IS TRUE)::int AS required_official_count,
@@ -287,23 +320,42 @@ reportRouter.get("/article/:articleId", async (req, res) => {
               COUNT(*) FILTER (WHERE results.free_shipping_required IS TRUE)::int AS required_free_ship_count,
               COUNT(*) FILTER (WHERE results.free_shipping_required IS TRUE AND results.free_shipping_applied IS TRUE)::int AS free_ship_met_count
        FROM results
-       WHERE results.search_id = $1 AND ${afRes}`,
-      pq.manual ? [articleId, pq.productTitle, pq.sellerOrNull] : [articleId],
+       WHERE results.search_id = $1 AND ${wfRes}`
+        : `SELECT COUNT(*)::int AS total_results,
+              COUNT(*) FILTER (WHERE results.official_store_required IS TRUE)::int AS required_official_count,
+              COUNT(*) FILTER (WHERE results.official_store_required IS TRUE AND results.official_store_applied IS TRUE)::int AS official_met_count,
+              COUNT(*) FILTER (WHERE results.free_shipping_required IS TRUE)::int AS required_free_ship_count,
+              COUNT(*) FILTER (WHERE results.free_shipping_required IS TRUE AND results.free_shipping_applied IS TRUE)::int AS free_ship_met_count
+       FROM results
+       WHERE results.search_id = $1 AND ${wfRes}`,
+      [articleId, ...scopeParams],
     ),
     pool.query(
-      pq.manual ? REPORT_PEERS_MANUAL : REPORT_PEERS_AUTO,
-      pq.manual
-        ? [String(article.article), String(article.detail ?? ""), pq.productTitle, pq.sellerOrNull]
-        : [String(article.article), String(article.detail ?? "")],
+      mode === "key"
+        ? REPORT_PEERS_KEY
+        : mode === "title"
+          ? REPORT_PEERS_MANUAL
+          : REPORT_PEERS_AUTO,
+      mode === "key"
+        ? [String(article.article), String(article.detail ?? ""), pq.productKey ?? ""]
+        : mode === "title"
+          ? [String(article.article), String(article.detail ?? ""), pq.productTitle, pq.sellerOrNull]
+          : [String(article.article), String(article.detail ?? "")],
     ),
     pool.query(
-      pq.manual
-        ? `SELECT trim(both from regexp_replace(lower(trim($1::text)), E'\\\\s+', ' ', 'g')) AS norm_title,
+      mode === "key"
+        ? `SELECT trim($1::text) AS norm_title, trim($1::text) AS display_title`
+        : mode === "title"
+          ? `SELECT trim(both from regexp_replace(lower(trim($1::text)), E'\\\\s+', ' ', 'g')) AS norm_title,
                   $1::text AS display_title`
-        : `WITH
+          : `WITH
        ${CTE_CANONICAL_PRODUCT_TITLE.trim()}
        SELECT norm_title, display_title FROM canonical_norm_title`,
-      pq.manual ? [pq.productTitle] : [articleId],
+      mode === "key"
+        ? [pq.productKey ?? ""]
+        : mode === "title"
+          ? [pq.productTitle]
+          : [articleId],
     ),
   ]);
 
@@ -362,10 +414,12 @@ reportRouter.get("/article/:articleId", async (req, res) => {
     disclaimer,
     analyticsScope: {
       hasCanonicalProduct: Boolean(scope?.norm_title),
-      scopeMode: pq.manual ? ("manual" as const) : ("auto" as const),
+      scopeMode:
+        mode === "canonical" ? ("auto" as const) : mode === "key" ? ("key" as const) : ("manual" as const),
       canonicalNormTitle: scope?.norm_title ?? null,
-      displayTitle: pq.manual ? pq.productTitle : (scope?.display_title ?? null),
-      sellerFilter: pq.manual ? pq.sellerOrNull : null,
+      displayTitle:
+        mode === "title" ? pq.productTitle : mode === "key" ? pq.productKey : (scope?.display_title ?? null),
+      sellerFilter: mode === "title" ? pq.sellerOrNull : null,
     },
     sections: {
       priceSeries: priceSeries.rows,

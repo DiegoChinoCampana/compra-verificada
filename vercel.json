@@ -10,6 +10,8 @@
     { "source": "/tableros/(.*)", "destination": "/index.html" },
     { "source": "/informe", "destination": "/index.html" },
     { "source": "/informe/(.*)", "destination": "/index.html" },
+    { "source": "/resumen", "destination": "/index.html" },
+    { "source": "/resumen/(.*)", "destination": "/index.html" },
     { "source": "/listados", "destination": "/index.html" },
     { "source": "/listados/(.*)", "destination": "/index.html" },
     { "source": "/resultados", "destination": "/index.html" },

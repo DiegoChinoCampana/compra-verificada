@@ -7,13 +7,18 @@ import { readClusterBatchMeta } from "../clusterBatchMeta.js";
 import { pool } from "../db.js";
 import { runProductClusteringJob } from "../jobs/productClusteringJob.js";
 import { isOpenAiApiKeyConfigured } from "../services/embeddingService.js";
-import { parseProductScopeQuery } from "../productScopeQuery.js";
+import {
+  parseProductScopeQuery,
+  productScopeMode,
+  scopeParamsAfterArticleId,
+  sqlWhereProductScope,
+} from "../productScopeQuery.js";
 import { RUNS_ONE_PER_DAY_CTE } from "../sql/runsOnePerDay.js";
 import {
   CTE_CANONICAL_PRODUCT_TITLE,
   sqlProductGroupingKey,
   sqlWhereManualProductTitleAndSeller,
-  sqlWhereTitleMatchesCanonical,
+  sqlWhereProductKey,
 } from "../sql/articleSameProductTitle.js";
 
 export const analyticsRouter = Router();
@@ -31,7 +36,18 @@ analyticsRouter.get("/article/:articleId/analytics-scope", async (req, res) => {
     return;
   }
   const pq = parseProductScopeQuery(req);
-  if (pq.manual) {
+  const mode = productScopeMode(pq);
+  if (mode === "key" && pq.productKey) {
+    res.json({
+      hasCanonicalProduct: true,
+      scopeMode: "key" as const,
+      canonicalNormTitle: pq.productKey,
+      displayTitle: pq.productKey,
+      sellerFilter: null,
+    });
+    return;
+  }
+  if (mode === "title") {
     const { rows } = await pool.query(
       `SELECT trim(both from regexp_replace(lower(trim($1::text)), E'\\\\s+', ' ', 'g')) AS norm_title`,
       [pq.productTitle],
@@ -69,26 +85,10 @@ analyticsRouter.get("/article/:articleId/price-series", async (req, res) => {
     return;
   }
   const pq = parseProductScopeQuery(req);
-  const mf = sqlWhereManualProductTitleAndSeller("r", 2, 3);
-  const af = sqlWhereTitleMatchesCanonical("r");
-  const sql = pq.manual
+  const useCte = productScopeMode(pq) === "canonical";
+  const wf = sqlWhereProductScope(pq, "r", { title: 2, seller: 3, key: 2 });
+  const sql = useCte
     ? `
-    WITH
-    ${RUNS_ONE_PER_DAY_CTE.trim()}
-    SELECT
-      sr.id AS scrape_run_id,
-      sr.executed_at,
-      MIN(r.price)::float8 AS min_price,
-      AVG(r.price)::float8 AS avg_price,
-      COUNT(*)::int AS listing_count
-    FROM results r
-    JOIN scrape_runs sr ON sr.id = r.scrape_run_id
-    JOIN runs_one_per_day d ON d.scrape_run_id = sr.id
-    WHERE r.search_id = $1 AND r.price IS NOT NULL AND ${mf}
-    GROUP BY sr.id, sr.executed_at
-    ORDER BY sr.executed_at ASC
-  `
-    : `
     WITH
     ${CTE_CANONICAL_PRODUCT_TITLE.trim()}
     SELECT
@@ -100,11 +100,27 @@ analyticsRouter.get("/article/:articleId/price-series", async (req, res) => {
     FROM results r
     JOIN scrape_runs sr ON sr.id = r.scrape_run_id
     JOIN runs_one_per_day d ON d.scrape_run_id = sr.id
-    WHERE r.search_id = $1 AND r.price IS NOT NULL AND ${af}
+    WHERE r.search_id = $1 AND r.price IS NOT NULL AND ${wf}
+    GROUP BY sr.id, sr.executed_at
+    ORDER BY sr.executed_at ASC
+  `
+    : `
+    WITH
+    ${RUNS_ONE_PER_DAY_CTE.trim()}
+    SELECT
+      sr.id AS scrape_run_id,
+      sr.executed_at,
+      MIN(r.price)::float8 AS min_price,
+      AVG(r.price)::float8 AS avg_price,
+      COUNT(*)::int AS listing_count
+    FROM results r
+    JOIN scrape_runs sr ON sr.id = r.scrape_run_id
+    JOIN runs_one_per_day d ON d.scrape_run_id = sr.id
+    WHERE r.search_id = $1 AND r.price IS NOT NULL AND ${wf}
     GROUP BY sr.id, sr.executed_at
     ORDER BY sr.executed_at ASC
   `;
-  const params = pq.manual ? [articleId, pq.productTitle, pq.sellerOrNull] : [articleId];
+  const params = [articleId, ...scopeParamsAfterArticleId(pq)];
   const { rows } = await pool.query(sql, params);
   res.json(rows);
 });
@@ -116,31 +132,10 @@ analyticsRouter.get("/article/:articleId/best-per-run", async (req, res) => {
     return;
   }
   const pq = parseProductScopeQuery(req);
-  const mf = sqlWhereManualProductTitleAndSeller("r", 2, 3);
-  const af = sqlWhereTitleMatchesCanonical("r");
-  const sql = pq.manual
+  const useCte = productScopeMode(pq) === "canonical";
+  const wf = sqlWhereProductScope(pq, "r", { title: 2, seller: 3, key: 2 });
+  const sql = useCte
     ? `
-    WITH
-    ${RUNS_ONE_PER_DAY_CTE.trim()},
-    ranked AS (
-      SELECT
-        sr.id AS scrape_run_id,
-        sr.executed_at,
-        r.title,
-        r.price::float8 AS price,
-        r.url,
-        r.seller,
-        r.rating::float8 AS rating,
-        ROW_NUMBER() OVER (PARTITION BY sr.id ORDER BY r.price ASC NULLS LAST) AS rn
-      FROM results r
-      JOIN scrape_runs sr ON sr.id = r.scrape_run_id
-      JOIN runs_one_per_day d ON d.scrape_run_id = sr.id
-      WHERE r.search_id = $1 AND r.price IS NOT NULL AND ${mf}
-    )
-    SELECT scrape_run_id, executed_at, title, price, url, seller, rating
-    FROM ranked WHERE rn = 1 ORDER BY executed_at ASC
-  `
-    : `
     WITH
     ${CTE_CANONICAL_PRODUCT_TITLE.trim()},
     ranked AS (
@@ -156,12 +151,33 @@ analyticsRouter.get("/article/:articleId/best-per-run", async (req, res) => {
       FROM results r
       JOIN scrape_runs sr ON sr.id = r.scrape_run_id
       JOIN runs_one_per_day d ON d.scrape_run_id = sr.id
-      WHERE r.search_id = $1 AND r.price IS NOT NULL AND ${af}
+      WHERE r.search_id = $1 AND r.price IS NOT NULL AND ${wf}
+    )
+    SELECT scrape_run_id, executed_at, title, price, url, seller, rating
+    FROM ranked WHERE rn = 1 ORDER BY executed_at ASC
+  `
+    : `
+    WITH
+    ${RUNS_ONE_PER_DAY_CTE.trim()},
+    ranked AS (
+      SELECT
+        sr.id AS scrape_run_id,
+        sr.executed_at,
+        r.title,
+        r.price::float8 AS price,
+        r.url,
+        r.seller,
+        r.rating::float8 AS rating,
+        ROW_NUMBER() OVER (PARTITION BY sr.id ORDER BY r.price ASC NULLS LAST) AS rn
+      FROM results r
+      JOIN scrape_runs sr ON sr.id = r.scrape_run_id
+      JOIN runs_one_per_day d ON d.scrape_run_id = sr.id
+      WHERE r.search_id = $1 AND r.price IS NOT NULL AND ${wf}
     )
     SELECT scrape_run_id, executed_at, title, price, url, seller, rating
     FROM ranked WHERE rn = 1 ORDER BY executed_at ASC
   `;
-  const params = pq.manual ? [articleId, pq.productTitle, pq.sellerOrNull] : [articleId];
+  const params = [articleId, ...scopeParamsAfterArticleId(pq)];
   const { rows } = await pool.query(sql, params);
   res.json(rows);
 });
@@ -173,28 +189,10 @@ analyticsRouter.get("/article/:articleId/dispersion", async (req, res) => {
     return;
   }
   const pq = parseProductScopeQuery(req);
-  const mf = sqlWhereManualProductTitleAndSeller("r", 2, 3);
-  const af = sqlWhereTitleMatchesCanonical("r");
-  const sql = pq.manual
+  const useCte = productScopeMode(pq) === "canonical";
+  const wf = sqlWhereProductScope(pq, "r", { title: 2, seller: 3, key: 2 });
+  const sql = useCte
     ? `
-    WITH
-    ${RUNS_ONE_PER_DAY_CTE.trim()}
-    SELECT
-      sr.id AS scrape_run_id,
-      sr.executed_at,
-      MIN(r.price)::float8 AS min_price,
-      MAX(r.price)::float8 AS max_price,
-      AVG(r.price)::float8 AS avg_price,
-      STDDEV_POP(r.price)::float8 AS stddev_pop,
-      COUNT(*)::int AS listing_count
-    FROM results r
-    JOIN scrape_runs sr ON sr.id = r.scrape_run_id
-    JOIN runs_one_per_day d ON d.scrape_run_id = sr.id
-    WHERE r.search_id = $1 AND r.price IS NOT NULL AND ${mf}
-    GROUP BY sr.id, sr.executed_at
-    ORDER BY sr.executed_at ASC
-  `
-    : `
     WITH
     ${CTE_CANONICAL_PRODUCT_TITLE.trim()}
     SELECT
@@ -208,11 +206,29 @@ analyticsRouter.get("/article/:articleId/dispersion", async (req, res) => {
     FROM results r
     JOIN scrape_runs sr ON sr.id = r.scrape_run_id
     JOIN runs_one_per_day d ON d.scrape_run_id = sr.id
-    WHERE r.search_id = $1 AND r.price IS NOT NULL AND ${af}
+    WHERE r.search_id = $1 AND r.price IS NOT NULL AND ${wf}
+    GROUP BY sr.id, sr.executed_at
+    ORDER BY sr.executed_at ASC
+  `
+    : `
+    WITH
+    ${RUNS_ONE_PER_DAY_CTE.trim()}
+    SELECT
+      sr.id AS scrape_run_id,
+      sr.executed_at,
+      MIN(r.price)::float8 AS min_price,
+      MAX(r.price)::float8 AS max_price,
+      AVG(r.price)::float8 AS avg_price,
+      STDDEV_POP(r.price)::float8 AS stddev_pop,
+      COUNT(*)::int AS listing_count
+    FROM results r
+    JOIN scrape_runs sr ON sr.id = r.scrape_run_id
+    JOIN runs_one_per_day d ON d.scrape_run_id = sr.id
+    WHERE r.search_id = $1 AND r.price IS NOT NULL AND ${wf}
     GROUP BY sr.id, sr.executed_at
     ORDER BY sr.executed_at ASC
   `;
-  const params = pq.manual ? [articleId, pq.productTitle, pq.sellerOrNull] : [articleId];
+  const params = [articleId, ...scopeParamsAfterArticleId(pq)];
   const { rows } = await pool.query(sql, params);
   const enriched = rows.map((row: Record<string, unknown>) => {
     const avg = row.avg_price as number | null;
@@ -232,25 +248,10 @@ analyticsRouter.get("/article/:articleId/sellers", async (req, res) => {
   }
   const days = Math.min(365, Math.max(7, Number(req.query.days) || 90));
   const pq = parseProductScopeQuery(req);
-  const mf = sqlWhereManualProductTitleAndSeller("results", 3, 4);
-  const af = sqlWhereTitleMatchesCanonical("results");
-  const sql = pq.manual
+  const useCte = productScopeMode(pq) === "canonical";
+  const wf = sqlWhereProductScope(pq, "results", { title: 3, seller: 4, key: 3 });
+  const sql = useCte
     ? `
-    SELECT
-      COALESCE(NULLIF(TRIM(results.seller), ''), '(sin vendedor)') AS seller,
-      COUNT(*)::int AS listing_count,
-      AVG(results.rating)::float8 AS avg_rating,
-      MIN(results.price)::float8 AS min_price_seen,
-      MAX(results.created_at) AS last_seen_at
-    FROM results
-    WHERE results.search_id = $1
-      AND results.created_at > NOW() - ($2::int * interval '1 day')
-      AND ${mf}
-    GROUP BY 1
-    ORDER BY listing_count DESC
-    LIMIT 30
-  `
-    : `
     WITH
     ${CTE_CANONICAL_PRODUCT_TITLE.trim()}
     SELECT
@@ -262,14 +263,27 @@ analyticsRouter.get("/article/:articleId/sellers", async (req, res) => {
     FROM results
     WHERE results.search_id = $1
       AND results.created_at > NOW() - ($2::int * interval '1 day')
-      AND ${af}
+      AND ${wf}
+    GROUP BY 1
+    ORDER BY listing_count DESC
+    LIMIT 30
+  `
+    : `
+    SELECT
+      COALESCE(NULLIF(TRIM(results.seller), ''), '(sin vendedor)') AS seller,
+      COUNT(*)::int AS listing_count,
+      AVG(results.rating)::float8 AS avg_rating,
+      MIN(results.price)::float8 AS min_price_seen,
+      MAX(results.created_at) AS last_seen_at
+    FROM results
+    WHERE results.search_id = $1
+      AND results.created_at > NOW() - ($2::int * interval '1 day')
+      AND ${wf}
     GROUP BY 1
     ORDER BY listing_count DESC
     LIMIT 30
   `;
-  const params = pq.manual
-    ? [articleId, days, pq.productTitle, pq.sellerOrNull]
-    : [articleId, days];
+  const params = [articleId, days, ...scopeParamsAfterArticleId(pq)];
   const { rows } = await pool.query(sql, params);
   res.json(rows);
 });
@@ -281,24 +295,10 @@ analyticsRouter.get("/article/:articleId/criteria", async (req, res) => {
     return;
   }
   const pq = parseProductScopeQuery(req);
-  const mf = sqlWhereManualProductTitleAndSeller("results", 2, 3);
-  const af = sqlWhereTitleMatchesCanonical("results");
-  const sql = pq.manual
+  const useCte = productScopeMode(pq) === "canonical";
+  const wf = sqlWhereProductScope(pq, "results", { title: 2, seller: 3, key: 2 });
+  const sql = useCte
     ? `
-    SELECT
-      COUNT(*)::int AS total_results,
-      COUNT(*) FILTER (WHERE results.official_store_required IS TRUE)::int AS required_official_count,
-      COUNT(*) FILTER (
-        WHERE results.official_store_required IS TRUE AND results.official_store_applied IS TRUE
-      )::int AS official_met_count,
-      COUNT(*) FILTER (WHERE results.free_shipping_required IS TRUE)::int AS required_free_ship_count,
-      COUNT(*) FILTER (
-        WHERE results.free_shipping_required IS TRUE AND results.free_shipping_applied IS TRUE
-      )::int AS free_ship_met_count
-    FROM results
-    WHERE results.search_id = $1 AND ${mf}
-  `
-    : `
     WITH
     ${CTE_CANONICAL_PRODUCT_TITLE.trim()}
     SELECT
@@ -312,9 +312,23 @@ analyticsRouter.get("/article/:articleId/criteria", async (req, res) => {
         WHERE results.free_shipping_required IS TRUE AND results.free_shipping_applied IS TRUE
       )::int AS free_ship_met_count
     FROM results
-    WHERE results.search_id = $1 AND ${af}
+    WHERE results.search_id = $1 AND ${wf}
+  `
+    : `
+    SELECT
+      COUNT(*)::int AS total_results,
+      COUNT(*) FILTER (WHERE results.official_store_required IS TRUE)::int AS required_official_count,
+      COUNT(*) FILTER (
+        WHERE results.official_store_required IS TRUE AND results.official_store_applied IS TRUE
+      )::int AS official_met_count,
+      COUNT(*) FILTER (WHERE results.free_shipping_required IS TRUE)::int AS required_free_ship_count,
+      COUNT(*) FILTER (
+        WHERE results.free_shipping_required IS TRUE AND results.free_shipping_applied IS TRUE
+      )::int AS free_ship_met_count
+    FROM results
+    WHERE results.search_id = $1 AND ${wf}
   `;
-  const params = pq.manual ? [articleId, pq.productTitle, pq.sellerOrNull] : [articleId];
+  const params = [articleId, ...scopeParamsAfterArticleId(pq)];
   const { rows } = await pool.query(sql, params);
   res.json(rows[0] ?? {});
 });
@@ -601,6 +615,55 @@ const PEERS_MANUAL_SQL = `
     ORDER BY l.min_p ASC NULLS LAST, g.brand ASC NULLS LAST
 `;
 
+const PEERS_KEY_SQL = `
+    WITH grp AS (
+      SELECT id, article, brand, detail, enabled
+      FROM articles
+      WHERE lower(trim(article)) = lower(trim($1::text))
+        AND lower(trim(coalesce(detail, ''))) = lower(trim(coalesce($2::text, '')))
+    ),
+    per_article_run AS (
+      SELECT
+        g.id AS article_id,
+        sr.id AS run_id,
+        sr.executed_at,
+        MIN(r.price) AS min_p
+      FROM grp g
+      INNER JOIN results r ON r.search_id = g.id AND r.price IS NOT NULL
+      INNER JOIN scrape_runs sr ON sr.id = r.scrape_run_id
+      WHERE ${sqlWhereProductKey("r", 4)}
+      GROUP BY g.id, sr.id, sr.executed_at
+    ),
+    per_day AS (
+      SELECT DISTINCT ON (p.article_id, date_trunc('day', p.executed_at))
+        p.article_id,
+        p.executed_at,
+        p.min_p
+      FROM per_article_run p
+      ORDER BY p.article_id, date_trunc('day', p.executed_at), p.executed_at DESC
+    ),
+    latest AS (
+      SELECT DISTINCT ON (article_id)
+        article_id,
+        executed_at,
+        min_p
+      FROM per_day
+      ORDER BY article_id, executed_at DESC
+    )
+    SELECT
+      g.id,
+      g.article,
+      g.brand,
+      g.detail,
+      g.enabled,
+      l.min_p::float8 AS latest_run_min_price,
+      l.executed_at AS latest_run_at
+    FROM grp g
+    LEFT JOIN latest l ON l.article_id = g.id
+    WHERE ($3::int IS NULL OR g.id <> $3)
+    ORDER BY l.min_p ASC NULLS LAST, g.brand ASC NULLS LAST
+`;
+
 analyticsRouter.get("/peers/by-article-detail", async (req, res) => {
   const article = typeof req.query.article === "string" ? req.query.article.trim() : "";
   const detail = typeof req.query.detail === "string" ? req.query.detail.trim() : "";
@@ -610,10 +673,15 @@ analyticsRouter.get("/peers/by-article-detail", async (req, res) => {
     return;
   }
   const pq = parseProductScopeQuery(req);
-  const sql = pq.manual ? PEERS_MANUAL_SQL : PEERS_AUTO_SQL;
-  const params = pq.manual
-    ? [article, detail, excludeId, pq.productTitle, pq.sellerOrNull]
-    : [article, detail, excludeId];
+  const mode = productScopeMode(pq);
+  const sql =
+    mode === "key" ? PEERS_KEY_SQL : mode === "title" ? PEERS_MANUAL_SQL : PEERS_AUTO_SQL;
+  const params =
+    mode === "key"
+      ? [article, detail, excludeId, pq.productKey ?? ""]
+      : mode === "title"
+        ? [article, detail, excludeId, pq.productTitle, pq.sellerOrNull]
+        : [article, detail, excludeId];
   const { rows } = await pool.query(sql, params);
   res.json(rows);
 });

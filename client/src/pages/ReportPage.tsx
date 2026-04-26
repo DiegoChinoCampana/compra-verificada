@@ -29,8 +29,10 @@ export function ReportPage() {
 
   const reportSuffix = useMemo(() => {
     const q = new URLSearchParams();
+    const pk = sp.get("productKey")?.trim();
     const pt = sp.get("productTitle")?.trim();
     const sl = sp.get("seller")?.trim();
+    if (pk) q.set("productKey", pk);
     if (pt) q.set("productTitle", pt);
     if (sl) q.set("seller", sl);
     const s = q.toString();
@@ -67,6 +69,7 @@ export function ReportPage() {
   }
 
   const { article, sections, recommendation, disclaimer, generatedAt, analyticsScope } = data;
+  const reportBrandDetailLine = [article.brand?.trim(), article.detail?.trim()].filter(Boolean).join(" · ");
 
   async function handleDownloadPdf() {
     const root = document.getElementById("report-pdf-root");
@@ -107,6 +110,7 @@ export function ReportPage() {
           ) : (
             <Link to="/resultados">Resultados</Link>
           )}
+          <Link to={`/resumen/${articleId}${reportSuffix}`}>Resumen para compartir</Link>
         </div>
         <button type="button" className="button" disabled={pdfBusy} onClick={() => void handleDownloadPdf()}>
           {pdfBusy ? "Generando PDF…" : "Descargar PDF"}
@@ -127,18 +131,19 @@ export function ReportPage() {
               decoding="async"
             />
             <div className="report-header__brand-text">
-              <p className="muted small">CompraVerificada · Informe para cliente</p>
-              <h1>
-                {article.article}
-                {article.brand ? ` — ${article.brand}` : ""}
-              </h1>
-              <p className="muted">
-                {article.detail ?? "Sin detalle"} · Generado{" "}
-                {new Date(generatedAt).toLocaleString("es-AR")}
+              <p className="muted small">CompraVerificada · Informe detallado</p>
+              <h1>{article.article}</h1>
+              {reportBrandDetailLine ? <p className="muted">{reportBrandDetailLine}</p> : null}
+              <p className="muted small">
+                Generado {new Date(generatedAt).toLocaleString("es-AR")}
               </p>
             </div>
           </div>
-        {analyticsScope?.scopeMode === "manual" && analyticsScope.displayTitle ? (
+        {analyticsScope?.scopeMode === "key" && analyticsScope.displayTitle ? (
+          <p className="muted small">
+            Informe acotado a la clave de producto «{analyticsScope.displayTitle}» (clustering semántico).
+          </p>
+        ) : analyticsScope?.scopeMode === "manual" && analyticsScope.displayTitle ? (
           <p className="muted small">
             Informe acotado al título «{analyticsScope.displayTitle}»
             {analyticsScope.sellerFilter ? ` y a la tienda/vendedor «${analyticsScope.sellerFilter}»` : ""}.

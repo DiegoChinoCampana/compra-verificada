@@ -34,18 +34,22 @@ export function ArticleResultsPage() {
   const [error, setError] = useState<string | null>(null);
   const [reloadNonce, setReloadNonce] = useState(0);
 
+  const pk = params.get("productKey")?.trim() ?? "";
   const pt = params.get("productTitle")?.trim() ?? "";
   const sl = params.get("seller")?.trim() ?? "";
+  const sort = params.get("sort")?.trim() === "product_key" ? "product_key" : "recent";
 
   const qs = useMemo(() => {
     const q = new URLSearchParams({
       limit: String(PAGE_SIZE),
       page: String(page),
     });
+    if (pk) q.set("productKey", pk);
     if (pt) q.set("productTitle", pt);
     if (sl) q.set("seller", sl);
+    if (sort === "product_key") q.set("sort", "product_key");
     return q.toString();
-  }, [page, pt, sl]);
+  }, [page, pk, pt, sl, sort]);
 
   useEffect(() => {
     if (!Number.isInteger(articleId)) return;
@@ -73,6 +77,14 @@ export function ArticleResultsPage() {
     const p = new URLSearchParams(params);
     if (next <= 1) p.delete("page");
     else p.set("page", String(next));
+    setParams(p);
+  }
+
+  function setSort(next: "recent" | "product_key") {
+    const p = new URLSearchParams(params);
+    if (next === "product_key") p.set("sort", "product_key");
+    else p.delete("sort");
+    p.delete("page");
     setParams(p);
   }
 
@@ -110,9 +122,14 @@ export function ArticleResultsPage() {
             {article.brand ? ` · ${article.brand}` : ""} · ID {articleId}
           </p>
           <p className="muted small">
-            Cada fila es una publicación capturada en una corrida. Orden: corrida más reciente
-            primero.
+            Cada fila es una publicación capturada en una corrida. Podés ordenar por corrida reciente o
+            agrupar por <code>product_key</code> (mismo cluster) abajo.
           </p>
+          {pk ? (
+            <p className="muted small" style={{ marginTop: "0.35rem" }}>
+              Listado acotado a la clave de producto (<code>product_key</code>) de la URL.
+            </p>
+          ) : null}
           {pt ? (
             <p className="muted small" style={{ marginTop: "0.35rem" }}>
               Listado acotado al título de publicación indicado en la URL
@@ -121,6 +138,24 @@ export function ArticleResultsPage() {
           ) : null}
         </div>
       </header>
+
+      <div className="card filters" style={{ marginBottom: "0.75rem", padding: "0.75rem 1rem" }}>
+        <label style={{ display: "block", maxWidth: "28rem" }}>
+          Orden de filas
+          <select
+            value={sort}
+            onChange={(e) => setSort(e.target.value === "product_key" ? "product_key" : "recent")}
+            style={{ display: "block", width: "100%", marginTop: "0.35rem" }}
+          >
+            <option value="recent">Corrida más reciente primero (por fecha de scrape)</option>
+            <option value="product_key">Mismo product_key (cluster) junto</option>
+          </select>
+          <span className="muted small" style={{ display: "block", marginTop: "0.35rem" }}>
+            Con <strong>product_key</strong> las filas del mismo cluster quedan juntas; dentro de cada clave,
+            la corrida más reciente primero. Sin clave van al final.
+          </span>
+        </label>
+      </div>
 
       <p className="muted small" style={{ marginBottom: "0.75rem" }}>
         Mostrando {from}–{to} de {payload.total} · Página {page} de {totalPages}{" "}

@@ -33,8 +33,10 @@ export function DashboardPage() {
 
   const scopeSuffix = useMemo(() => {
     const q = new URLSearchParams();
+    const pk = sp.get("productKey")?.trim();
     const pt = sp.get("productTitle")?.trim();
     const sl = sp.get("seller")?.trim();
+    if (pk) q.set("productKey", pk);
     if (pt) q.set("productTitle", pt);
     if (sl) q.set("seller", sl);
     const s = q.toString();
@@ -66,8 +68,10 @@ export function DashboardPage() {
           detail: a.detail ?? "",
           excludeId: String(a.id),
         });
+        const pk = sp.get("productKey")?.trim();
         const pt = sp.get("productTitle")?.trim();
         const sl = sp.get("seller")?.trim();
+        if (pk) peerParams.set("productKey", pk);
         if (pt) peerParams.set("productTitle", pt);
         if (sl) peerParams.set("seller", sl);
 
@@ -168,7 +172,11 @@ export function DashboardPage() {
             {article.detail ?? "Sin detalle"} · Orden listado: {article.ordered_by ?? "—"}
           </p>
           {staleNote && <p className="warn">{staleNote}</p>}
-          {scope?.scopeMode === "manual" && scope.displayTitle ? (
+          {scope?.scopeMode === "key" && scope.displayTitle ? (
+            <p className="muted small" style={{ marginTop: "0.5rem" }}>
+              Alcance fijado por clave de producto (clustering): «{scope.displayTitle}».
+            </p>
+          ) : scope?.scopeMode === "manual" && scope.displayTitle ? (
             <p className="muted small" style={{ marginTop: "0.5rem" }}>
               Alcance fijado por título de publicación «{scope.displayTitle}»
               {scope.sellerFilter ? ` · tienda/vendedor contiene «${scope.sellerFilter}»` : ""}.

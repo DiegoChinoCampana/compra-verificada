@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { fetchJson } from "../../api";
 import type { PeerGapByNamePayload } from "../../types";
+import { productScopeFromGroupKey } from "../../productScopeUrl";
 import { AnalysisTechnicalHelp } from "./AnalysisTechnicalHelp";
 
 function pctFmt(v: number | null | undefined): string {
@@ -73,13 +74,16 @@ export function AnalysisPeerGapPage() {
       <p className="muted small">
         Compará el precio de referencia de cada ficha habilitada contra la{" "}
         <strong>mediana</strong> de otras marcas del mismo grupo. Orden: mayor magnitud de brecha primero.
+        Ese precio de referencia ya tiene en cuenta el <strong>clustering</strong> cuando hay{" "}
+        <code>product_key</code> (p. ej. <code>cluster:…</code>), igual que en el tablero al filtrar por
+        producto.
       </p>
       <p className="muted small">
-        <strong>Mismo “producto” acá no es el título de Mercado Libre.</strong> El agrupamiento usa solo los
-        textos guardados en la ficha: <em>artículo</em> y <em>detalle</em> (ambos vienen de la configuración
-        de cada búsqueda, no del listado de ML), iguales salvo mayúsculas/minúsculas y espacios al inicio o
-        al final. Si dos fichas tienen distinto detalle o distinto artículo normalizado, no entran en el
-        mismo grupo aunque en el listado aparezcan publicaciones con título parecido.
+        <strong>Grupo peer:</strong> solo textos de la ficha (<em>artículo</em> y <em>detalle</em>), no el
+        título de ML para armar el grupo entre marcas. <strong>Precio de referencia por ficha:</strong> en la
+        última corrida se toma el mínimo entre publicaciones que comparten la misma clave de producto (
+        <code>product_key</code> del batch si existe —típicamente <code>cluster:…</code>—; si no, título de
+        listado normalizado), no el mínimo global de toda la corrida.
       </p>
 
       <AnalysisTechnicalHelp>
@@ -103,9 +107,9 @@ export function AnalysisPeerGapPage() {
             mismo artículo + detalle (normalizado) con alguna candidata.
           </li>
           <li>
-            <strong>Precio de referencia por ficha:</strong> en <code>results</code> se toma la corrida más
-            reciente por <code>search_id</code> (vía <code>scrape_runs.executed_at</code>); el mínimo de{" "}
-            <code>price</code> en esa corrida, solo valores positivos.
+            <strong>Precio de referencia por ficha:</strong> corrida más reciente por <code>search_id</code>;
+            el mínimo de <code>price</code> entre filas que comparten la clave del listado más barato de esa
+            corrida (<code>product_key</code> o título normalizado), solo valores positivos.
           </li>
           <li>
             <strong>Mediana de peers:</strong> sobre esos mínimos, la mediana (<code>percentile_cont(0.5)</code>
@@ -170,7 +174,9 @@ export function AnalysisPeerGapPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {data.rows.map((r) => (
+                  {data.rows.map((r) => {
+                    const scope = productScopeFromGroupKey(r.ref_group_key);
+                    return (
                     <tr key={r.id}>
                       <td className="cell-title-multiline">{r.article}</td>
                       <td>{r.brand ?? "—"}</td>
@@ -188,12 +194,13 @@ export function AnalysisPeerGapPage() {
                       </td>
                       <td title="(ref. propia − mediana peers) / mediana peers">{pctFmt(r.gap_vs_peer_median_pct)}</td>
                       <td className="actions">
-                        <Link to={`/articulos/${r.id}`}>Tablero</Link>
-                        <Link to={`/articulos/${r.id}/listados`}>Listados</Link>
-                        <Link to={`/informe/${r.id}`}>Informe</Link>
+                        <Link to={`/articulos/${r.id}${scope}`}>Tablero</Link>
+                        <Link to={`/articulos/${r.id}/listados${scope}`}>Listados</Link>
+                        <Link to={`/informe/${r.id}${scope}`}>Informe</Link>
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

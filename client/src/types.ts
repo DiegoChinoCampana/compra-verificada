@@ -89,7 +89,7 @@ export type Recommendation = {
 /** Cómo se acotan gráficos / informe al “mismo producto” por título. */
 export type AnalyticsScopePayload = {
   hasCanonicalProduct: boolean;
-  scopeMode?: "auto" | "manual";
+  scopeMode?: "auto" | "manual" | "key";
   canonicalNormTitle: string | null;
   displayTitle: string | null;
   sellerFilter?: string | null;
@@ -161,10 +161,14 @@ export type ScrapedResultsPagePayload = {
   rows: ScrapedResultListRow[];
 };
 
-/** Fila de /api/analysis/price-stability-by-name (agrupa por título de listado normalizado). */
+/** Fila de /api/analysis/price-stability-by-name (agrupa por `product_key` o título normalizado). */
 export type PriceStabilityRow = {
   series_id: number;
   product_title: string;
+  /** Título de publicación ML más reciente en el grupo (siempre útil para lectura humana). */
+  sample_listing_title: string;
+  /** Misma clave de agrupación que en servidor (`sqlProductGroupingKey`). */
+  group_key: string;
   n_articles: number;
   primary_article_id: number;
   n_days: number;
@@ -185,6 +189,7 @@ export type PriceStabilityDailyPoint = {
 export type PriceStabilityDailySeries = {
   series_id: number;
   product_title: string;
+  sample_listing_title: string;
   points: PriceStabilityDailyPoint[];
 };
 
@@ -202,6 +207,8 @@ export type PeerGapRow = {
   article: string;
   brand: string | null;
   detail: string | null;
+  /** Clave del listado más barato en la última corrida (product_key o título normalizado). */
+  ref_group_key: string;
   my_ref_min: number;
   peer_median: number | null;
   gap_vs_peer_median_pct: number | null;
@@ -216,6 +223,8 @@ export type PeerGapByNamePayload = {
 /** Fila de /api/analysis/price-jumps-by-name */
 export type PriceJumpRow = {
   product_title: string;
+  sample_listing_title: string;
+  group_key: string;
   n_articles: number;
   primary_article_id: number;
   day_from: string;

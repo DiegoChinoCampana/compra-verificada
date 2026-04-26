@@ -1,7 +1,8 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { fetchJson } from "../../api";
-import { productScopeQueryString } from "../../productScopeUrl";
+import { productScopeFromGroupKey } from "../../productScopeUrl";
+import { AnalysisProductCell } from "./AnalysisProductCell";
 import { AnalysisTechnicalHelp } from "./AnalysisTechnicalHelp";
 import type { PriceJumpsByNamePayload } from "../../types";
 
@@ -81,21 +82,22 @@ export function AnalysisPriceJumpsPage() {
     <div>
       <h2>Alertas de salto de precio (día a día)</h2>
       <p className="muted small">
-        Te muestra publicaciones (agrupadas por el mismo texto de título que en el tablero) donde el
-        precio más bajo del día “pegó un salto” fuerte respecto al día anterior con dato. Sirve para
-        detectar ofertas flash, errores de scrape, cambios de vendedor o listados que se movieron mucho en
-        poco tiempo, y entrar a la ficha o al informe con un clic.
+        Te muestra publicaciones agrupadas por la <strong>misma clave de producto</strong> que en el tablero
+        (<code>product_key</code> del clustering cuando existe; si no, título de listado normalizado),
+        donde el precio más bajo del día “pegó un salto” fuerte respecto al día anterior con dato. Sirve
+        para detectar ofertas flash, errores de scrape, cambios de vendedor o listados que se movieron
+        mucho en poco tiempo, y entrar a la ficha o al informe con un clic.
       </p>
       <p className="muted small">
         Solo aparecen casos cuyo mayor salto relativo día a día en el período supera el umbral que elijas.
         Misma ventana temporal y misma regla de título que en estabilidad de precios.
       </p>
       <p className="muted small">
-        <strong>Mismo producto acá sí usa el título del listado</strong> (<code>results.title</code>), pero{" "}
-        <strong>no exige que el texto sea idéntico carácter por carácter</strong>: se normaliza (todo en
-        minúsculas y espacios consecutivos unificados a un solo espacio, sin espacios al borde). Así, dos
-        publicaciones con el mismo título salvo mayúsculas o espacios extra cuentan como la misma línea de
-        producto, igual que cuando filtrás por producto en el tablero.
+        <strong>Sin clustering</strong>, el agrupamiento sigue el título de listado (
+        <code>results.title</code>) normalizado (minúsculas, espacios unificados, sin bordes), igual que en
+        el tablero. <strong>Con clustering</strong>, gana <code>product_key</code> (p. ej.{" "}
+        <code>cluster:…</code>); en la tabla ves la clave y debajo un <strong>título de publicación</strong>{" "}
+        representativo para orientarte.
       </p>
 
       <AnalysisTechnicalHelp>
@@ -107,13 +109,13 @@ export function AnalysisPriceJumpsPage() {
         </p>
         <ol>
           <li>
-            <strong>Agrupación por producto:</strong> clave a partir de <code>results.title</code> normalizado
-            (<code>lower</code>, espacios colapsados, <code>trim</code>), misma lógica que el tablero al
-            filtrar por producto. Sin título no entra.
+            <strong>Agrupación por producto:</strong> usa <code>product_key</code> del clustering cuando
+            viene informado; si no, el título de publicación normalizado (misma lógica que estabilidad y el
+            tablero). Sin título no entra.
           </li>
           <li>
-            <strong>Mínimo diario por título:</strong> por cada día con datos, el mínimo de{" "}
-            <code>price</code> entre todas las publicaciones de ese <code>title_key</code> (todas las fichas
+            <strong>Mínimo diario por clave:</strong> por cada día con datos, el mínimo de{" "}
+            <code>price</code> entre todas las publicaciones de esa misma clave (todas las fichas
             candidatas).
           </li>
           <li>
@@ -178,12 +180,12 @@ export function AnalysisPriceJumpsPage() {
       {!loading && data && (
         <>
           <p className="muted small" style={{ margin: "0.75rem 0" }}>
-            «{data.name}» · {data.days} días · umbral {data.threshold_pct} % · {data.count} títulos con
+            «{data.name}» · {data.days} días · umbral {data.threshold_pct} % · {data.count} productos con
             salto máximo ≥ umbral (tope 120 filas).
           </p>
           {data.rows.length === 0 ? (
             <p className="muted">
-              No hay títulos que superen el umbral en ese período (o no hay dos días consecutivos con
+              No hay productos que superen el umbral en ese período (o no hay dos días consecutivos con
               precio).
             </p>
           ) : (
@@ -191,7 +193,9 @@ export function AnalysisPriceJumpsPage() {
               <table className="table table--dense">
                 <thead>
                   <tr>
-                    <th>Título del listado</th>
+                    <th title="Con clustering: product_key y título ML; sin clustering: título normalizado.">
+                      Producto
+                    </th>
                     <th>Fichas</th>
                     <th>Salto máx.</th>
                     <th>Día anterior</th>
@@ -201,11 +205,19 @@ export function AnalysisPriceJumpsPage() {
                 </thead>
                 <tbody>
                   {data.rows.map((r) => {
-                    const scope = productScopeQueryString(r.product_title, null);
+                    const scope = productScopeFromGroupKey(r.group_key);
                     const base = `/articulos/${r.primary_article_id}`;
                     return (
-                      <tr key={`${r.product_title}-${r.day_from}-${r.day_to}`}>
-                        <td className="cell-title-multiline">{r.product_title}</td>
+                      <tr key={`${r.group_key}-${r.day_from}-${r.day_to}`}>
+                        <td>
+                          <AnalysisProductCell
+                            row={{
+                              group_key: r.group_key,
+                              product_title: r.product_title,
+                              sample_listing_title: r.sample_listing_title,
+                            }}
+                          />
+                        </td>
                         <td>{r.n_articles}</td>
                         <td title="Máximo entre días consecutivos con dato en la ventana">{pctFmt(r.max_jump_pct)}</td>
                         <td>{r.day_from}</td>

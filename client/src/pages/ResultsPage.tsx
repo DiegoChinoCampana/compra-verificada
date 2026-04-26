@@ -15,12 +15,14 @@ function shortProductKey(s: string | null | undefined): string {
 }
 
 function filtersFromParams(p: URLSearchParams) {
+  const s = p.get("sort")?.trim();
   return {
     article: p.get("article") ?? "",
     brand: p.get("brand") ?? "",
     detail: p.get("detail") ?? "",
     title: p.get("title") ?? "",
     seller: p.get("seller") ?? "",
+    sort: s === "product_key" ? ("product_key" as const) : ("recent" as const),
   };
 }
 
@@ -67,6 +69,7 @@ export function ResultsPage() {
     if (filters.detail.trim()) q.set("detail", filters.detail.trim());
     if (filters.title.trim()) q.set("title", filters.title.trim());
     if (filters.seller.trim()) q.set("seller", filters.seller.trim());
+    if (filters.sort === "product_key") q.set("sort", "product_key");
     q.set("limit", String(PAGE_SIZE));
     q.set("page", "1");
     setParams(q);
@@ -84,7 +87,7 @@ export function ResultsPage() {
   }
 
   function scopeForRow(r: ScrapedResultListRow) {
-    return productScopeQueryString(r.title, r.seller);
+    return productScopeQueryString(r.title, r.seller, r.product_key);
   }
 
   const resultsNavState: FromResultsLocationState = {
@@ -138,6 +141,25 @@ export function ResultsPage() {
               onChange={(e) => setFilters((f) => ({ ...f, seller: e.target.value }))}
               placeholder="Contiene…"
             />
+          </label>
+          <label>
+            Orden de filas
+            <select
+              value={filters.sort}
+              onChange={(e) =>
+                setFilters((f) => ({
+                  ...f,
+                  sort: e.target.value === "product_key" ? "product_key" : "recent",
+                }))
+              }
+            >
+              <option value="recent">Más recientes primero (captura)</option>
+              <option value="product_key">Mismo product_key (cluster) junto</option>
+            </select>
+            <span className="muted small" style={{ display: "block", marginTop: "0.35rem" }}>
+              Con <strong>product_key</strong> las filas del mismo cluster quedan agrupadas; sin clave van
+              al final.
+            </span>
           </label>
         </div>
         <div className="form-actions">
@@ -200,6 +222,9 @@ export function ResultsPage() {
                         state={resultsNavState}
                       >
                         Listados
+                      </Link>
+                      <Link to={`/resumen/${r.article_id}${scopeForRow(r)}`} state={resultsNavState}>
+                        Resumen
                       </Link>
                       <Link to={`/informe/${r.article_id}${scopeForRow(r)}`} state={resultsNavState}>
                         Informe

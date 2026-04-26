@@ -13,7 +13,8 @@ import {
   YAxis,
 } from "recharts";
 import { fetchJson } from "../../api";
-import { productScopeQueryString } from "../../productScopeUrl";
+import { productScopeFromGroupKey } from "../../productScopeUrl";
+import { AnalysisProductCell, analysisProductTooltipTitle } from "./AnalysisProductCell";
 import { AnalysisTechnicalHelp } from "./AnalysisTechnicalHelp";
 import type {
   PriceStabilityByNamePayload,
@@ -37,8 +38,14 @@ function moneyFmt(n: number): string {
 }
 
 function rowChartLabel(r: PriceStabilityRow): string {
-  const s = r.product_title;
-  return s.length > 44 ? `${s.slice(0, 42)}…` : s;
+  const title = (r.sample_listing_title?.trim() || r.product_title).trim();
+  const gk = r.group_key.trim();
+  if (gk.startsWith("cluster:")) {
+    const k = gk.length > 18 ? `${gk.slice(0, 16)}…` : gk;
+    const t = title.length > 24 ? `${title.slice(0, 22)}…` : title;
+    return `${k} · ${t}`;
+  }
+  return title.length > 44 ? `${title.slice(0, 42)}…` : title;
 }
 
 const LINE_SERIES_CAP = 25;
@@ -99,7 +106,12 @@ function mergeDailySeries(seriesList: PriceStabilityDailySeries[]): Record<strin
   });
 }
 
-type SeriesMeta = { primaryArticleId: number; productTitle: string };
+type SeriesMeta = {
+  primaryArticleId: number;
+  productTitle: string;
+  sampleListingTitle: string;
+  groupKey: string;
+};
 
 type DailyTooltipPayloadItem = {
   dataKey?: string | number;
@@ -150,7 +162,7 @@ function DailyMinEvolutionTooltip({
           const n = typeof raw === "number" ? raw : raw != null && raw !== "" ? Number(raw) : NaN;
           const priceStr = Number.isFinite(n) ? moneyFmt(n) : "—";
           const meta = seriesMeta.get(seriesId);
-          const scope = meta ? productScopeQueryString(meta.productTitle, null) : "";
+          const scope = meta ? productScopeFromGroupKey(meta.groupKey) : "";
           const base = meta ? `/articulos/${meta.primaryArticleId}` : "";
 
           return (
@@ -161,9 +173,26 @@ function DailyMinEvolutionTooltip({
                 aria-hidden
               />
               <div className="chart-tooltip-daily__main">
-                <span className="chart-tooltip-daily__title" title={meta?.productTitle ?? item?.name}>
-                  {meta?.productTitle ?? item?.name ?? `#${seriesId}`}
-                </span>
+                {meta ? (
+                  <div
+                    className="chart-tooltip-daily__title"
+                    title={analysisProductTooltipTitle({
+                      group_key: meta.groupKey,
+                      product_title: meta.productTitle,
+                      sample_listing_title: meta.sampleListingTitle,
+                    })}
+                  >
+                    <AnalysisProductCell
+                      row={{
+                        group_key: meta.groupKey,
+                        product_title: meta.productTitle,
+                        sample_listing_title: meta.sampleListingTitle,
+                      }}
+                    />
+                  </div>
+                ) : (
+                  <span className="chart-tooltip-daily__title">{item?.name ?? `#${seriesId}`}</span>
+                )}
                 {meta ? (
                   <span className="chart-tooltip-daily__links">
                     <Link
@@ -299,6 +328,8 @@ export function AnalysisPriceStabilityPage() {
       m.set(r.series_id, {
         primaryArticleId: r.primary_article_id,
         productTitle: r.product_title,
+        sampleListingTitle: r.sample_listing_title,
+        groupKey: r.group_key,
       });
     }
     return m;
@@ -318,10 +349,10 @@ export function AnalysisPriceStabilityPage() {
       <p className="muted small">
         Buscá por texto en el <strong>nombre de la ficha</strong> (ej. <strong>Colchón</strong>) y un
         período. Se unen los resultados scrapeados de <strong>todas las fichas</strong> que coinciden
-        y se agrupan por <strong>título de publicación idéntico</strong> (misma normalización que el
-        tablero al filtrar por producto): cada fila es un producto concreto visto en Mercado Libre, aunque
-        aparezca en varias búsquedas. Orden: primero los que menos variaron o bajaron de precio, con
-        menos oscilación entre días.
+        y se agrupan por <strong>clave de producto semántica</strong> (<code>product_key</code> del batch de
+        clustering) cuando existe; si no, por <strong>título de publicación normalizado</strong> (mismo
+        criterio que el tablero). Cada fila es un producto concreto, aunque aparezca en varias búsquedas.
+        Orden: primero los que menos variaron o bajaron de precio, con menos oscilación entre días.
       </p>
 
       <AnalysisTechnicalHelp>
@@ -339,11 +370,10 @@ export function AnalysisPriceStabilityPage() {
           período (10 / 30 / 60 días).
         </p>
         <p>
-          Para agrupar “el mismo producto de Mercado Libre” no se usa el nombre de la ficha: se normaliza
-          el título de publicación <code>results.title</code> (minúsculas, espacios repetidos en uno solo,{" "}
-          <code>trim</code>), igual que cuando filtrás por producto en el tablero. Esa clave (
-          <code>title_key</code>) puede juntar filas de <strong>varias fichas</strong> distintas si el
-          título publicación coincide tras normalizar.
+          Para agrupar “el mismo producto” se usa <code>COALESCE(product_key, título normalizado)</code> en{" "}
+          <code>results</code>: si hay clustering, gana <code>product_key</code> (p. ej.{" "}
+          <code>cluster:…</code>); si no, el título de publicación normalizado como antes. Esa clave puede
+          juntar filas de <strong>varias fichas</strong> distintas.
         </p>
         <p>
           Por cada combinación <strong>ficha + día calendario</strong> se elige la corrida más reciente
@@ -391,13 +421,13 @@ export function AnalysisPriceStabilityPage() {
       {!loading && data && (
         <>
           <p className="muted small" style={{ margin: "0.75rem 0" }}>
-            «{data.name}» · ventana {data.days} días · {data.count} títulos de listado distintos con al
-            menos 2 días de precio en el período (corrida más reciente por día y ficha).
+            «{data.name}» ·             ventana {data.days} días · {data.count} productos distintos (clave o título) con al menos 2 días
+            de precio en el período (corrida más reciente por día y ficha).
           </p>
           {data.rows.length === 0 ? (
             <p className="muted">
-              No hay títulos de publicación con datos suficientes para ese criterio (revisá que haya
-              resultados con título y precio en la ventana).
+              No hay productos con datos suficientes para ese criterio (revisá que haya resultados con título
+              y precio en la ventana).
             </p>
           ) : (
             <>
@@ -545,8 +575,8 @@ export function AnalysisPriceStabilityPage() {
               <table className="table table--dense table--col-help table--price-stability">
                 <thead>
                   <tr>
-                    <th title="Texto exacto de la publicación en Mercado Libre (agrupa todas las fichas donde apareció el mismo título normalizado: mayúsculas y espacios no importan).">
-                      Título del listado
+                    <th title="Si hay clustering, se muestra la product_key y debajo un título de listado representativo; si no, solo el título normalizado.">
+                      Producto
                     </th>
                     <th title="Cantidad de fichas de búsqueda distintas (artículos habilitados) en las que apareció este título en el período.">
                       Fichas
@@ -569,18 +599,26 @@ export function AnalysisPriceStabilityPage() {
                     <th title="Coeficiente de variación de los mínimos diarios (desvío estándar / promedio). Mide qué tan dispersos estuvieron los mínimos día a día; más bajo suele significar precio más estable.">
                       CV diario
                     </th>
-                    <th title="Abre tablero, listados o informe en una ficha que incluye este título, ya filtrado por el mismo producto (equivalente a elegir el alcance manual por título).">
+                    <th title="Abre tablero, listados o informe en una ficha, filtrado por la misma clave de producto (product_key o título normalizado).">
                       Enlaces
                     </th>
                   </tr>
                 </thead>
                 <tbody>
                   {data.rows.map((r) => {
-                    const scope = productScopeQueryString(r.product_title, null);
+                    const scope = productScopeFromGroupKey(r.group_key);
                     const base = `/articulos/${r.primary_article_id}`;
                     return (
                     <tr key={r.series_id}>
-                      <td className="cell-title-multiline">{r.product_title}</td>
+                      <td>
+                        <AnalysisProductCell
+                          row={{
+                            group_key: r.group_key,
+                            product_title: r.product_title,
+                            sample_listing_title: r.sample_listing_title,
+                          }}
+                        />
+                      </td>
                       <td>{r.n_articles}</td>
                       <td>{r.n_days}</td>
                       <td>

@@ -9,6 +9,7 @@ import { AnalysisPriceJumpsPage } from "./pages/analysis/AnalysisPriceJumpsPage"
 import { AnalysisPriceStabilityPage } from "./pages/analysis/AnalysisPriceStabilityPage";
 import { ResultsPage } from "./pages/ResultsPage";
 import { OperationalPage } from "./pages/OperationalPage";
+import { ClientReportPage } from "./pages/ClientReportPage";
 import { ReportPage } from "./pages/ReportPage";
 import "./App.css";
 
@@ -28,6 +29,7 @@ export default function App() {
         <Route path="articulos/:id/listados" element={<ArticleResultsPage />} />
         <Route path="articulos/:id" element={<DashboardPage />} />
         <Route path="informe/:id" element={<ReportPage />} />
+        <Route path="resumen/:id" element={<ClientReportPage />} />
         <Route path="operacion" element={<OperationalPage />} />
       </Route>
     </Routes>

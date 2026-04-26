@@ -11,10 +11,10 @@ const groupKeyExpr = sqlProductGroupingKey("r");
 
 /**
  * Por nombre de artículo (fichas habilitadas que lo contienen en `articles.article`):
- * agrupa **todos los resultados scrapeados** por título de publicación normalizado (mismo criterio
- * que tablero / informe con `productTitle`: lower, espacios colapsados).
- * Por cada título único: mínimo precio por día (una corrida por día y ficha, la más reciente),
- * métricas de estabilidad y enlace vía `primary_article_id` + título display.
+ * agrupa resultados por **product_key** (clustering) si existe; si no, por título de publicación
+ * normalizado (mismo criterio que tablero / informe con `productTitle`).
+ * Por cada clave: mínimo precio por día (una corrida por día y ficha, la más reciente),
+ * métricas de estabilidad y enlace vía `primary_article_id` + etiqueta (`product_key` o título ML).
  */
 analysisRouter.get("/price-stability-by-name", async (req, res) => {
   const name = typeof req.query.name === "string" ? req.query.name.trim() : "";
@@ -55,6 +55,7 @@ analysisRouter.get("/price-stability-by-name", async (req, res) => {
       SELECT
         ${groupKeyExpr} AS title_key,
         r.title AS title_raw,
+        r.product_key AS result_product_key,
         r.search_id,
         r.price::float8 AS price,
         sr.executed_at
@@ -90,8 +91,13 @@ analysisRouter.get("/price-stability-by-name", async (req, res) => {
     product_title AS (
       SELECT
         title_key,
-        (array_agg(title_raw ORDER BY executed_at DESC, search_id))[1]::text AS product_title
-      FROM result_rows
+        CASE
+          WHEN trim(max(coalesce(rr.result_product_key, ''))) <> ''
+          THEN trim(max(rr.result_product_key))
+          ELSE (array_agg(rr.title_raw ORDER BY rr.executed_at DESC, rr.search_id))[1]::text
+        END AS product_title,
+        (array_agg(rr.title_raw ORDER BY rr.executed_at DESC, rr.search_id))[1]::text AS sample_listing_title
+      FROM result_rows rr
       GROUP BY title_key
     ),
     title_meta AS (
@@ -106,6 +112,7 @@ analysisRouter.get("/price-stability-by-name", async (req, res) => {
     ranked AS (
       SELECT
         pt.product_title,
+        pt.sample_listing_title,
         tm.n_articles,
         tm.primary_article_id,
         s.title_key,
@@ -142,6 +149,7 @@ analysisRouter.get("/price-stability-by-name", async (req, res) => {
             rnk.product_title ASC
         )::int AS series_id,
         rnk.product_title,
+        rnk.sample_listing_title,
         rnk.n_articles,
         rnk.primary_article_id,
         rnk.title_key,
@@ -156,6 +164,7 @@ analysisRouter.get("/price-stability-by-name", async (req, res) => {
     SELECT
       series_id,
       product_title,
+      sample_listing_title,
       n_articles,
       primary_article_id,
       n_days,
@@ -164,7 +173,7 @@ analysisRouter.get("/price-stability-by-name", async (req, res) => {
       trend_pct,
       range_pct,
       cv_daily_mins,
-      title_key
+      title_key AS group_key
     FROM numbered
     LIMIT 120
   `;
@@ -172,6 +181,7 @@ analysisRouter.get("/price-stability-by-name", async (req, res) => {
   const { rows: rawRows } = await pool.query<{
     series_id: number;
     product_title: string;
+    sample_listing_title: string;
     n_articles: number;
     primary_article_id: number;
     n_days: number;
@@ -180,14 +190,15 @@ analysisRouter.get("/price-stability-by-name", async (req, res) => {
     trend_pct: string | number | null;
     range_pct: string | number | null;
     cv_daily_mins: string | number | null;
-    title_key: string;
+    group_key: string;
   }>(sql, [name, days]);
 
-  const titleKeys = rawRows.map((r) => r.title_key);
+  const titleKeys = rawRows.map((r) => r.group_key);
 
   let daily_by_series: {
     series_id: number;
     product_title: string;
+    sample_listing_title: string;
     points: { day: string; min_price: number }[];
   }[] = [];
 
@@ -221,6 +232,7 @@ analysisRouter.get("/price-stability-by-name", async (req, res) => {
         SELECT
           ${groupKeyExpr} AS title_key,
           r.title AS title_raw,
+          r.product_key AS result_product_key,
           r.search_id,
           r.price::float8 AS price,
           sr.executed_at
@@ -261,11 +273,12 @@ analysisRouter.get("/price-stability-by-name", async (req, res) => {
     daily_by_series = rawRows.map((r) => ({
       series_id: r.series_id,
       product_title: r.product_title,
-      points: byKey.get(r.title_key) ?? [],
+      sample_listing_title: r.sample_listing_title,
+      points: byKey.get(r.group_key) ?? [],
     }));
   }
 
-  const rows = rawRows.map(({ title_key: _tk, ...rest }) => rest);
+  const rows = rawRows;
 
   res.json({
     name,
@@ -314,12 +327,24 @@ analysisRouter.get("/peer-gap-by-name", async (req, res) => {
       WHERE r.price IS NOT NULL AND r.price > 0
       ORDER BY r.search_id, sr.executed_at DESC
     ),
-    latest_run_price AS (
-      SELECT lr.article_id, MIN(r.price)::float8 AS ref_min
+    ref_pick AS (
+      SELECT DISTINCT ON (lr.article_id)
+        lr.article_id,
+        ${sqlProductGroupingKey("r")} AS ref_group_key
       FROM latest_run lr
       INNER JOIN results r ON r.scrape_run_id = lr.run_id AND r.search_id = lr.article_id
       WHERE r.price IS NOT NULL AND r.price > 0
-      GROUP BY lr.article_id
+      ORDER BY lr.article_id, r.price ASC NULLS LAST, r.id ASC
+    ),
+    latest_run_price AS (
+      SELECT rp.article_id, MIN(r.price)::float8 AS ref_min, rp.ref_group_key
+      FROM ref_pick rp
+      INNER JOIN latest_run lr ON lr.article_id = rp.article_id
+      INNER JOIN results r ON r.scrape_run_id = lr.run_id AND r.search_id = lr.article_id
+      WHERE r.price IS NOT NULL
+        AND r.price > 0
+        AND ${sqlProductGroupingKey("r")} = rp.ref_group_key
+      GROUP BY rp.article_id, rp.ref_group_key
     ),
     ranked AS (
       SELECT
@@ -328,6 +353,7 @@ analysisRouter.get("/peer-gap-by-name", async (req, res) => {
         c.brand,
         c.detail,
         my.ref_min AS my_ref_min,
+        my.ref_group_key,
         (
           SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY x.ref_min)
           FROM latest_run_price x
@@ -346,6 +372,7 @@ analysisRouter.get("/peer-gap-by-name", async (req, res) => {
       article,
       brand,
       detail,
+      ref_group_key,
       my_ref_min,
       peer_median,
       CASE
@@ -420,6 +447,7 @@ analysisRouter.get("/price-jumps-by-name", async (req, res) => {
       SELECT
         ${groupKeyExpr} AS title_key,
         r.title AS title_raw,
+        r.product_key AS result_product_key,
         r.search_id,
         r.price::float8 AS price,
         sr.executed_at
@@ -477,8 +505,15 @@ analysisRouter.get("/price-jumps-by-name", async (req, res) => {
       ORDER BY jr.title_key, jr.jump_pct DESC NULLS LAST, jr.day_end DESC
     ),
     product_pick AS (
-      SELECT title_key, (array_agg(title_raw ORDER BY executed_at DESC, search_id))[1]::text AS product_title
-      FROM result_rows
+      SELECT
+        title_key,
+        CASE
+          WHEN trim(max(coalesce(rr.result_product_key, ''))) <> ''
+          THEN trim(max(rr.result_product_key))
+          ELSE (array_agg(rr.title_raw ORDER BY rr.executed_at DESC, rr.search_id))[1]::text
+        END AS product_title,
+        (array_agg(rr.title_raw ORDER BY rr.executed_at DESC, rr.search_id))[1]::text AS sample_listing_title
+      FROM result_rows rr
       GROUP BY title_key
     ),
     title_meta AS (
@@ -488,8 +523,10 @@ analysisRouter.get("/price-jumps-by-name", async (req, res) => {
     )
     SELECT
       pp.product_title,
+      pp.sample_listing_title,
       tm.n_articles,
       tm.primary_article_id,
+      b.title_key AS group_key,
       to_char(wp.day_start, 'YYYY-MM-DD') AS day_from,
       to_char(wp.day_end, 'YYYY-MM-DD') AS day_to,
       wp.worst_jump_pct AS max_jump_pct

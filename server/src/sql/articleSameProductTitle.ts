@@ -14,6 +14,11 @@ export function sqlProductGroupingKey(alias: string): string {
   return `COALESCE(NULLIF(trim(${alias}.product_key), ''), ${n})`;
 }
 
+/** Filtro exacto por `product_key` (batch clustering). `keyIdx` = placeholder $ en la consulta. */
+export function sqlWhereProductKey(alias: string, keyIdx: number): string {
+  return `(trim(coalesce(${alias}.product_key, '')) = trim($${keyIdx}::text))`;
+}
+
 /**
  * Tras `runs_one_per_day`: candidatos por corrida (precio mínimo) y título canónico
  * (moda entre esos ganadores por corrida; desempate por corrida más reciente).
@@ -27,6 +32,7 @@ per_run_price_rank AS (
     sr.executed_at,
     ${sqlProductGroupingKey("r")} AS norm_title,
     r.title AS raw_title,
+    r.product_key AS result_product_key,
     r.price::float8 AS price,
     ROW_NUMBER() OVER (PARTITION BY sr.id ORDER BY r.price ASC NULLS LAST) AS rn
   FROM results r
@@ -38,11 +44,18 @@ canonical_norm_title AS (
   SELECT
     mode_norm.norm_title,
     (
-      SELECT pr.raw_title
-      FROM per_run_price_rank pr
-      WHERE pr.rn = 1 AND pr.norm_title = mode_norm.norm_title
-      ORDER BY pr.executed_at DESC
-      LIMIT 1
+      SELECT CASE
+        WHEN mk.has_key THEN mk.key_text
+        ELSE mk.fallback_title
+      END
+      FROM (
+        SELECT
+          trim(max(coalesce(pr.result_product_key, ''))) <> '' AS has_key,
+          trim(max(pr.result_product_key)) AS key_text,
+          (array_agg(pr.raw_title ORDER BY pr.executed_at DESC))[1]::text AS fallback_title
+        FROM per_run_price_rank pr
+        WHERE pr.rn = 1 AND pr.norm_title = mode_norm.norm_title
+      ) mk
     ) AS display_title
   FROM (
     SELECT pr.norm_title

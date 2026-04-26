@@ -1,7 +1,10 @@
 import { Router } from "express";
 import { pool } from "../db.js";
-import { parseProductScopeQuery } from "../productScopeQuery.js";
-import { sqlWhereManualProductTitleAndSeller } from "../sql/articleSameProductTitle.js";
+import { parseProductScopeQuery, productScopeMode } from "../productScopeQuery.js";
+import {
+  sqlWhereManualProductTitleAndSeller,
+  sqlWhereProductKey,
+} from "../sql/articleSameProductTitle.js";
 
 export const articlesRouter = Router();
 
@@ -54,12 +57,44 @@ articlesRouter.get("/:id/results", async (req, res) => {
   const offset = (page - 1) * limit;
 
   const pq = parseProductScopeQuery(req);
-  const scopeF = pq.manual ? sqlWhereManualProductTitleAndSeller("r", 2, 3) : "TRUE";
+  const mode = productScopeMode(pq);
+  const scopeF =
+    mode === "key" && pq.productKey
+      ? sqlWhereProductKey("r", 2)
+      : mode === "title"
+        ? sqlWhereManualProductTitleAndSeller("r", 2, 3)
+        : "TRUE";
   const scopeWhere = pq.manual ? `AND ${scopeF}` : "";
+
+  const scopeParams =
+    mode === "key" && pq.productKey
+      ? [articleId, pq.productKey]
+      : mode === "title"
+        ? [articleId, pq.productTitle, pq.sellerOrNull]
+        : [articleId];
+
+  const sortRaw = typeof req.query.sort === "string" ? req.query.sort.trim() : "";
+  const sortByProductKey = sortRaw === "product_key";
+  const orderBy = sortByProductKey
+    ? `(CASE WHEN NULLIF(trim(coalesce(r.product_key, '')), '') IS NULL THEN 1 ELSE 0 END) ASC,
+       lower(trim(coalesce(r.product_key, ''))) ASC NULLS LAST,
+       sr.executed_at DESC NULLS LAST,
+       r.id DESC`
+    : "sr.executed_at DESC NULLS LAST, r.id DESC";
+
+  /** Tras $1 = search_id y filtros de alcance: índices de LIMIT / OFFSET. */
+  const limitIdx = pq.manual ? (mode === "key" && pq.productKey ? 3 : 4) : 2;
+  const offsetIdx = limitIdx + 1;
+  const dataParams: unknown[] =
+    mode === "key" && pq.productKey
+      ? [articleId, pq.productKey, limit, offset]
+      : mode === "title"
+        ? [articleId, pq.productTitle, pq.sellerOrNull, limit, offset]
+        : [articleId, limit, offset];
 
   const { rows: countRows } = await pool.query(
     `SELECT COUNT(*)::int AS n FROM results r WHERE r.search_id = $1 ${scopeWhere}`,
-    pq.manual ? [articleId, pq.productTitle, pq.sellerOrNull] : [articleId],
+    scopeParams,
   );
   const total = (countRows[0] as { n: number }).n;
 
@@ -86,11 +121,9 @@ articlesRouter.get("/:id/results", async (req, res) => {
     FROM results r
     INNER JOIN scrape_runs sr ON sr.id = r.scrape_run_id
     WHERE r.search_id = $1 ${scopeWhere}
-    ORDER BY sr.executed_at DESC NULLS LAST, r.id DESC
-    LIMIT $${pq.manual ? 4 : 2} OFFSET $${pq.manual ? 5 : 3}`,
-    pq.manual
-      ? [articleId, pq.productTitle, pq.sellerOrNull, limit, offset]
-      : [articleId, limit, offset],
+    ORDER BY ${orderBy}
+    LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
+    dataParams,
   );
 
   res.json({

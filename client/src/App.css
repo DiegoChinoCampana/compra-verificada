@@ -552,6 +552,54 @@ button:hover {
   margin: 0 0 1rem;
 }
 
+.client-report .rec__factors.client-report__factors {
+  list-style: none;
+  padding-left: 0;
+}
+
+.client-report__factors li {
+  display: flex;
+  gap: 0.65rem;
+  align-items: flex-start;
+  margin-bottom: 0.65rem;
+}
+
+.client-report__factors li:last-child {
+  margin-bottom: 0;
+}
+
+.client-report__factor-icon {
+  flex-shrink: 0;
+  width: 1.5rem;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.client-report__subtitle {
+  font-size: 1.05rem;
+  margin: -0.15rem 0 0.35rem;
+  color: var(--muted);
+}
+
+.client-report__scope {
+  margin-top: 0.5rem;
+  max-width: 40rem;
+}
+
+.client-report__disclaimer {
+  line-height: 1.45;
+}
+
+.client-report__lead {
+  margin: 0;
+  font-size: 1.05rem;
+  line-height: 1.45;
+}
+
+.client-report__rec .rec__label {
+  letter-spacing: 0.04em;
+}
+
 .analysis-tech-help {
   margin-top: 0.75rem;
 }

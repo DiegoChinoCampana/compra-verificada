@@ -14,6 +14,15 @@ resultsRouter.get("/", async (req, res) => {
   const page = Math.max(1, Number(req.query.page) || 1);
   const offset = (page - 1) * limit;
 
+  const sortRaw = typeof req.query.sort === "string" ? req.query.sort.trim() : "";
+  const sortByProductKey = sortRaw === "product_key";
+  const orderBy = sortByProductKey
+    ? `(CASE WHEN NULLIF(trim(coalesce(r.product_key, '')), '') IS NULL THEN 1 ELSE 0 END) ASC,
+       lower(trim(coalesce(r.product_key, ''))) ASC NULLS LAST,
+       sr.executed_at DESC NULLS LAST,
+       r.created_at DESC`
+    : "r.created_at DESC";
+
   const where = `
     ($1::text = '' OR a.article ILIKE '%' || $1 || '%')
     AND ($2::text = '' OR COALESCE(a.brand, '') ILIKE '%' || $2 || '%')
@@ -55,7 +64,7 @@ resultsRouter.get("/", async (req, res) => {
      INNER JOIN articles a ON a.id = r.search_id
      INNER JOIN scrape_runs sr ON sr.id = r.scrape_run_id
      WHERE ${where}
-     ORDER BY r.created_at DESC
+     ORDER BY ${orderBy}
      LIMIT $6 OFFSET $7`,
     [...baseParams, limit, offset],
   );
