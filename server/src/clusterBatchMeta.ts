@@ -24,6 +24,9 @@ export type ClusterBatchMetaPayload = {
   skipPairwiseMerge?: boolean;
   /** Umbral usado en fusión por par máximo (si no se omite). */
   pairwiseMergeMinSimilarity?: number;
+  /** Longitud mínima del token de anclaje por título (si aplica). */
+  titleAnchorMinLen?: number;
+  skipTitleAnchorMerge?: boolean;
   resetScope: boolean;
   durationMs: number;
 };

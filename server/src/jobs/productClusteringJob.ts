@@ -23,6 +23,10 @@ export type ProductClusteringJobInput = {
   pairwiseMergeMinSimilarity?: number;
   /** Si no se envía, se respeta `CLUSTER_SKIP_PAIRWISE_MERGE` en el servidor. */
   skipPairwiseMerge?: boolean;
+  /** Longitud mínima del token alfanumérico (con al menos un dígito) para anclar por título. */
+  titleAnchorMinLen?: number;
+  /** Si no se envía, se respeta `CLUSTER_SKIP_TITLE_ANCHOR_MERGE` en el servidor. */
+  skipTitleAnchorMerge?: boolean;
   embedOnly?: boolean;
   clusterOnly?: boolean;
   /** Si true, borra product_key de todas las filas del artículo (ILIKE) en la ventana de días antes de DBSCAN. */
@@ -253,6 +257,83 @@ function mergeClustersByMaxPairwiseSim(
   return out;
 }
 
+/**
+ * Une clusters que comparten un mismo “código” en el título (alfanumérico largo con dígito),
+ * p. ej. MATDGB23UAP en dos publicaciones distintas cuando el embedding no las acerca lo suficiente.
+ */
+function mergeClustersBySharedTitleAnchors(
+  labels: number[],
+  titles: (string | null)[],
+  minTokenLen: number,
+): number[] {
+  const n = labels.length;
+  const clusterIds = [...new Set(labels.filter((l) => l >= 0))].sort((a, b) => a - b);
+  if (clusterIds.length <= 1) return labels;
+
+  function anchors(title: string | null): string[] {
+    if (!title) return [];
+    const upper = title.toUpperCase();
+    const parts = upper.match(/[A-Z0-9]+/g) ?? [];
+    return [...new Set(parts)].filter((tok) => tok.length >= minTokenLen && /[0-9]/.test(tok));
+  }
+
+  const tokenToClusters = new Map<string, Set<number>>();
+  for (let i = 0; i < n; i++) {
+    const L = labels[i]!;
+    if (L < 0) continue;
+    for (const tok of anchors(titles[i]!)) {
+      if (!tokenToClusters.has(tok)) tokenToClusters.set(tok, new Set());
+      tokenToClusters.get(tok)!.add(L);
+    }
+  }
+
+  const parent = new Map<number, number>();
+  for (const c of clusterIds) parent.set(c, c);
+
+  function find(x: number): number {
+    let p = parent.get(x)!;
+    if (p !== x) {
+      p = find(p);
+      parent.set(x, p);
+    }
+    return p;
+  }
+  function union(a: number, b: number): void {
+    const ra = find(a);
+    const rb = find(b);
+    if (ra !== rb) parent.set(ra, rb);
+  }
+
+  for (const [_tok, set] of tokenToClusters) {
+    if (set.size < 2) continue;
+    const arr = [...set];
+    const c0 = arr[0]!;
+    for (let k = 1; k < arr.length; k++) {
+      union(c0, arr[k]!);
+    }
+  }
+
+  const roots = new Set<number>();
+  for (const c of clusterIds) roots.add(find(c));
+  const sortedRoots = [...roots].sort((a, b) => a - b);
+  const rootToNew = new Map<number, number>();
+  sortedRoots.forEach((r, idx) => rootToNew.set(r, idx));
+
+  const out = [...labels];
+  for (let i = 0; i < n; i++) {
+    const L = labels[i]!;
+    if (L < 0) continue;
+    out[i] = rootToNew.get(find(L))!;
+  }
+  const reduced = clusterIds.length - sortedRoots.length;
+  if (reduced > 0) {
+    console.log(
+      `[cluster] fusión por código en título (≥${minTokenLen} chars, con dígito): ${clusterIds.length} → ${sortedRoots.length} clusters`,
+    );
+  }
+  return out;
+}
+
 function parseVectorText(raw: string): number[] {
   const s = raw.trim();
   try {
@@ -315,6 +396,20 @@ function envSkipPairwiseMerge(): boolean {
   );
 }
 
+function envSkipTitleAnchorMerge(): boolean {
+  return (
+    process.env.CLUSTER_SKIP_TITLE_ANCHOR_MERGE === "1" ||
+    process.env.CLUSTER_SKIP_TITLE_ANCHOR_MERGE === "true"
+  );
+}
+
+function envTitleAnchorMinLen(): number {
+  const raw = process.env.CLUSTER_TITLE_ANCHOR_MIN_LEN?.trim();
+  const n = raw ? Number(raw) : NaN;
+  if (!Number.isFinite(n)) return 10;
+  return Math.min(24, Math.max(8, Math.round(n)));
+}
+
 async function runCluster(
   pool: Pool,
   opts: {
@@ -329,6 +424,8 @@ async function runCluster(
     centroidMergeMinSimilarity: number;
     skipPairwiseMerge: boolean;
     pairwiseMergeMinSimilarity: number;
+    skipTitleAnchorMerge: boolean;
+    titleAnchorMinLen: number;
   },
 ): Promise<ClusterRunStats> {
   const eps = 1 - opts.minSimilarity;
@@ -356,9 +453,9 @@ async function runCluster(
     );
   }
 
-  const { rows } = await pool.query<{ id: number; emb_text: string }>(
+  const { rows } = await pool.query<{ id: number; emb_text: string; title: string | null }>(
     `
-    SELECT r.id, e.embedding::text AS emb_text
+    SELECT r.id, e.embedding::text AS emb_text, r.title
     FROM results r
     INNER JOIN result_embeddings e ON e.result_id = r.id
     INNER JOIN scrape_runs sr ON sr.id = r.scrape_run_id
@@ -379,6 +476,7 @@ async function runCluster(
 
   const points: number[][] = [];
   const ids: number[] = [];
+  const titles: (string | null)[] = [];
   for (const row of rows) {
     const vec = parseVectorText(row.emb_text);
     if (vec.length === 0) {
@@ -387,6 +485,7 @@ async function runCluster(
     }
     points.push(vec);
     ids.push(row.id);
+    titles.push(row.title);
   }
   if (points.length < opts.minPts) {
     console.log(`[cluster] muy pocas filas (${points.length}) < minPts=${opts.minPts}, abort.`);
@@ -409,6 +508,9 @@ async function runCluster(
   }
   if (!opts.skipPairwiseMerge) {
     labels = mergeClustersByMaxPairwiseSim(labels, points, opts.pairwiseMergeMinSimilarity);
+  }
+  if (!opts.skipTitleAnchorMerge) {
+    labels = mergeClustersBySharedTitleAnchors(labels, titles, opts.titleAnchorMinLen);
   }
   const slug = opts.article.replace(/\s+/g, "_").slice(0, 40);
 
@@ -473,6 +575,16 @@ function normalizeJobInput(raw: ProductClusteringJobInput): Required<
       : centroidMergeMinSimilarity;
   const skipPairwiseMerge =
     raw.skipPairwiseMerge === true ? true : raw.skipPairwiseMerge === false ? false : envSkipPairwiseMerge();
+  const parsedAnchorLen = raw.titleAnchorMinLen !== undefined ? Number(raw.titleAnchorMinLen) : NaN;
+  const titleAnchorMinLen = Number.isFinite(parsedAnchorLen)
+    ? Math.min(24, Math.max(8, Math.round(parsedAnchorLen)))
+    : envTitleAnchorMinLen();
+  const skipTitleAnchorMerge =
+    raw.skipTitleAnchorMerge === true
+      ? true
+      : raw.skipTitleAnchorMerge === false
+        ? false
+        : envSkipTitleAnchorMerge();
   return {
     article,
     days,
@@ -484,6 +596,8 @@ function normalizeJobInput(raw: ProductClusteringJobInput): Required<
     skipCentroidMerge,
     pairwiseMergeMinSimilarity,
     skipPairwiseMerge,
+    titleAnchorMinLen,
+    skipTitleAnchorMerge,
     embedOnly: Boolean(raw.embedOnly),
     clusterOnly: Boolean(raw.clusterOnly),
     resetArticleWindow: Boolean(raw.resetArticleWindow),
@@ -532,6 +646,8 @@ export async function runProductClusteringJob(
       centroidMergeMinSimilarity: opts.centroidMergeMinSimilarity,
       skipPairwiseMerge: opts.skipPairwiseMerge,
       pairwiseMergeMinSimilarity: opts.pairwiseMergeMinSimilarity,
+      skipTitleAnchorMerge: opts.skipTitleAnchorMerge,
+      titleAnchorMinLen: opts.titleAnchorMinLen,
     });
   }
 
@@ -549,6 +665,8 @@ export async function runProductClusteringJob(
     skipCentroidMerge: opts.skipCentroidMerge,
     pairwiseMergeMinSimilarity: opts.pairwiseMergeMinSimilarity,
     skipPairwiseMerge: opts.skipPairwiseMerge,
+    titleAnchorMinLen: opts.titleAnchorMinLen,
+    skipTitleAnchorMerge: opts.skipTitleAnchorMerge,
     resetArticleWindow: opts.resetArticleWindow,
     resetScope: opts.resetScope,
     durationMs: Date.now() - t0,

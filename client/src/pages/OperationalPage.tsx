@@ -29,6 +29,8 @@ export function OperationalPage() {
   const [clusterPairwiseMergeSim, setClusterPairwiseMergeSim] = useState(0.86);
   const [clusterSkipCentroidMerge, setClusterSkipCentroidMerge] = useState(false);
   const [clusterSkipPairwiseMerge, setClusterSkipPairwiseMerge] = useState(false);
+  const [clusterTitleAnchorMinLen, setClusterTitleAnchorMinLen] = useState(10);
+  const [clusterSkipTitleAnchorMerge, setClusterSkipTitleAnchorMerge] = useState(false);
   const [clusterLimit, setClusterLimit] = useState(8000);
   const [clusterBatchSize, setClusterBatchSize] = useState(40);
   const [clusterRunning, setClusterRunning] = useState(false);
@@ -95,6 +97,8 @@ export function OperationalPage() {
         skipCentroidMerge: clusterSkipCentroidMerge,
         pairwiseMergeMinSimilarity: clusterPairwiseMergeSim,
         skipPairwiseMerge: clusterSkipPairwiseMerge,
+        titleAnchorMinLen: clusterTitleAnchorMinLen,
+        skipTitleAnchorMerge: clusterSkipTitleAnchorMerge,
         limit: clusterLimit,
         batchSize: clusterBatchSize,
       };
@@ -339,6 +343,30 @@ export function OperationalPage() {
               Desactivar fusión por par entre clusters
             </label>
             <label>
+              Anclaje por código en título — long. mín.
+              <input
+                type="number"
+                min={8}
+                max={24}
+                step={1}
+                value={clusterTitleAnchorMinLen}
+                onChange={(e) => setClusterTitleAnchorMinLen(Math.round(Number(e.target.value)) || 10)}
+                disabled={clusterSkipTitleAnchorMerge}
+              />
+              <span className="muted small" style={{ display: "block", marginTop: "0.2rem" }}>
+                Une clusters si comparten un mismo token alfanumérico largo con dígito (p. ej.{" "}
+                <code>MATDGB23UAP</code>) aunque el embedding los separe. Por defecto 10.
+              </span>
+            </label>
+            <label style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+              <input
+                type="checkbox"
+                checked={clusterSkipTitleAnchorMerge}
+                onChange={(e) => setClusterSkipTitleAnchorMerge(e.target.checked)}
+              />
+              Desactivar anclaje por código en título
+            </label>
+            <label>
               Límite de filas (embed + cluster)
               <input
                 type="number"
@@ -449,6 +477,11 @@ export function OperationalPage() {
               ? " · sin fusión por par"
               : clusterMeta.lastRun.pairwiseMergeMinSimilarity != null
                 ? ` · fusión par sim ≥ ${clusterMeta.lastRun.pairwiseMergeMinSimilarity}`
+                : ""}
+            {clusterMeta.lastRun.skipTitleAnchorMerge
+              ? " · sin anclaje título"
+              : clusterMeta.lastRun.titleAnchorMinLen != null
+                ? ` · anclaje título ≥${clusterMeta.lastRun.titleAnchorMinLen}`
                 : ""}{" "}
             · {(clusterMeta.lastRun.durationMs / 1000).toFixed(1)}s
           </p>
