@@ -10,6 +10,7 @@ import {
 } from "../reportClientCopy";
 import { RESULTS_SCRAPED_LEDE } from "../resultsScrapedLede";
 import { isFromResultsState, resultsListPath } from "../resultsNavState";
+import { asHtml2PdfOptions } from "../pdfHtml2PdfOptions";
 import type { ReportPayload } from "../types";
 
 function sanitizeFilenamePart(s: string): string {
@@ -92,17 +93,19 @@ export function ClientReportPage() {
     try {
       const html2pdf = (await import("html2pdf.js")).default;
       await html2pdf()
-        .set({
-          margin: [10, 10, 10, 10],
-          filename: `CompraVerificada_resumen_${articleId}_${sanitizeFilenamePart(a.article)}.pdf`,
-          image: { type: "jpeg", quality: 0.92 },
-          html2canvas: { scale: 2, useCORS: true, logging: false },
-          jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
-          pagebreak: {
-            mode: ["css", "legacy"],
-            avoid: [".report-pdf-root section", ".report-pdf-root .table-wrap", ".report-pdf-root table"],
-          },
-        })
+        .set(
+          asHtml2PdfOptions({
+            margin: [10, 10, 10, 10],
+            filename: `CompraVerificada_resumen_${articleId}_${sanitizeFilenamePart(a.article)}.pdf`,
+            image: { type: "jpeg", quality: 0.92 },
+            html2canvas: { scale: 2, useCORS: true, logging: false },
+            jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
+            pagebreak: {
+              mode: ["css", "legacy"],
+              avoid: [".report-pdf-root section", ".report-pdf-root .table-wrap", ".report-pdf-root table"],
+            },
+          }),
+        )
         .from(root)
         .save();
     } catch (e) {
