@@ -368,9 +368,36 @@ analyticsRouter.get("/operational/missing-recent-results", async (req, res) => {
   res.json(rows);
 });
 
+const NO_RESULT_EMBEDDINGS_HINT =
+  "No existe la tabla result_embeddings (hace falta pgvector). En Postgres, como superusuario: " +
+  "CREATE EXTENSION IF NOT EXISTS vector; luego ejecutá el bloque de server/db/schema.sql que crea " +
+  "result_embeddings o reiniciá la API para que ensureSchema la cree. Sin eso, embeddings y clustering no pueden correr.";
+
+async function resultEmbeddingsTableExists(): Promise<boolean> {
+  const { rows } = await pool.query<{ e: boolean }>(
+    `SELECT EXISTS (
+      SELECT 1 FROM information_schema.tables
+      WHERE table_schema = 'public' AND table_name = 'result_embeddings'
+    ) AS e`,
+  );
+  return rows[0]?.e === true;
+}
+
 /** Última corrida del script `clusterProducts.ts` + conteos (para pantalla Operación). */
 analyticsRouter.get("/operational/product-clustering-meta", async (_req, res) => {
   const lastRun = await readClusterBatchMeta(pool);
+  const embeddingsReady = await resultEmbeddingsTableExists();
+  if (!embeddingsReady) {
+    res.json({
+      lastRun,
+      counts: null,
+      countsError: NO_RESULT_EMBEDDINGS_HINT,
+      embeddingsTableReady: false,
+      requiresClusterBatchSecret: clusterBatchRequiresClientSecret(),
+      openAiConfigured: isOpenAiApiKeyConfigured(),
+    });
+    return;
+  }
   try {
     const { rows } = await pool.query<{
       with_product_key: number;
@@ -386,6 +413,7 @@ analyticsRouter.get("/operational/product-clustering-meta", async (_req, res) =>
     res.json({
       lastRun,
       counts: rows[0] ?? null,
+      embeddingsTableReady: true,
       requiresClusterBatchSecret: clusterBatchRequiresClientSecret(),
       openAiConfigured: isOpenAiApiKeyConfigured(),
     });
@@ -394,6 +422,7 @@ analyticsRouter.get("/operational/product-clustering-meta", async (_req, res) =>
       lastRun,
       counts: null,
       countsError: e instanceof Error ? e.message : String(e),
+      embeddingsTableReady: true,
       requiresClusterBatchSecret: clusterBatchRequiresClientSecret(),
       openAiConfigured: isOpenAiApiKeyConfigured(),
     });
@@ -428,6 +457,14 @@ analyticsRouter.post("/operational/product-clustering-run", async (req, res) => 
       (typeof headerSecret === "string" ? headerSecret : Array.isArray(headerSecret) ? headerSecret[0] : undefined) ??
       body.secret;
     assertClusterBatchAuthorized(secret);
+
+    if (!(await resultEmbeddingsTableExists())) {
+      res.status(503).json({
+        ok: false as const,
+        error: NO_RESULT_EMBEDDINGS_HINT,
+      });
+      return;
+    }
 
     const article = typeof body.article === "string" ? body.article.trim() : "";
     if (article.length < 2) {

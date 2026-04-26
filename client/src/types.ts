@@ -120,6 +120,8 @@ export type ProductClusteringMetaPayload = {
   requiresClusterBatchSecret?: boolean;
   /** Si el proceso de API ve `OPENAI_API_KEY` (embeddings). */
   openAiConfigured?: boolean;
+  /** `false` = no existe `result_embeddings` (falta extensión `vector` / esquema). Ausente = API vieja. */
+  embeddingsTableReady?: boolean;
   lastRun: {
     finishedAt: string;
     article: string;

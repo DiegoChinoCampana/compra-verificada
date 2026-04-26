@@ -142,7 +142,15 @@ export function OperationalPage() {
       );
       setClusterMeta(meta);
     } catch (err) {
-      setClusterRunError(String(err));
+      const raw = String(err);
+      let msg = raw;
+      try {
+        const j = JSON.parse(raw) as { error?: string };
+        if (typeof j.error === "string" && j.error.trim()) msg = j.error.trim();
+      } catch {
+        /* mensaje plano */
+      }
+      setClusterRunError(msg);
     } finally {
       setClusterRunning(false);
     }
@@ -153,7 +161,9 @@ export function OperationalPage() {
   }
 
   const needSecret = Boolean(clusterMeta?.requiresClusterBatchSecret);
-  const submitDisabled = clusterRunning || (needSecret && !clusterSecret.trim());
+  const embeddingsBlocked = clusterMeta?.embeddingsTableReady === false;
+  const submitDisabled =
+    clusterRunning || (needSecret && !clusterSecret.trim()) || embeddingsBlocked;
 
   return (
     <div>
@@ -194,6 +204,11 @@ export function OperationalPage() {
             corrida sin token (no exponer el puerto a internet).
           </p>
         )}
+        {embeddingsBlocked && clusterMeta?.countsError ? (
+          <p className="error" style={{ marginTop: "0.75rem", marginBottom: 0 }}>
+            <strong>Clustering deshabilitado:</strong> {clusterMeta.countsError}
+          </p>
+        ) : null}
 
         <form className="card" style={{ marginTop: "0.75rem", padding: "1rem" }} onSubmit={onRunClustering}>
           {needSecret && !clusterSecret.trim() ? (
@@ -406,9 +421,11 @@ export function OperationalPage() {
               title={
                 clusterRunning
                   ? "Corrida en curso en el servidor…"
-                  : needSecret && !clusterSecret.trim()
-                    ? "Completá el token (mismo valor que CLUSTER_BATCH_SECRET en el servidor)"
-                    : undefined
+                  : embeddingsBlocked
+                    ? "Falta la tabla result_embeddings (pgvector). Ver el mensaje en rojo arriba."
+                    : needSecret && !clusterSecret.trim()
+                      ? "Completá el token (mismo valor que CLUSTER_BATCH_SECRET en el servidor)"
+                      : undefined
               }
             >
               {clusterRunning ? "Ejecutando…" : "Ejecutar clustering"}
@@ -441,7 +458,7 @@ export function OperationalPage() {
           cd server{"\n"}
           npm run embed:cluster -- --article=Microondas --days=60
         </pre>
-        {clusterMeta?.countsError ? (
+        {clusterMeta?.countsError && !embeddingsBlocked ? (
           <p className="error" style={{ marginTop: "0.75rem" }}>
             Conteos no disponibles: {clusterMeta.countsError}
           </p>
