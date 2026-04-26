@@ -475,6 +475,14 @@ button:hover {
   background: var(--surface);
 }
 
+/* PDF (html2pdf): evitar cortar tablas / bloques entre páginas (thead vs tbody). */
+.report-pdf-root section,
+.report-pdf-root .table-wrap,
+.report-pdf-root table {
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
 .report-header__brand {
   display: flex;
   align-items: flex-start;
