@@ -19,6 +19,10 @@ export type ProductClusteringJobInput = {
   centroidMergeMinSimilarity?: number;
   /** Si no se envía, se respeta `CLUSTER_SKIP_CENTROID_MERGE` en el servidor. */
   skipCentroidMerge?: boolean;
+  /** Similitud mínima entre el par más parecido de dos clusters (0.5–0.999). Por defecto = fusión centroides. */
+  pairwiseMergeMinSimilarity?: number;
+  /** Si no se envía, se respeta `CLUSTER_SKIP_PAIRWISE_MERGE` en el servidor. */
+  skipPairwiseMerge?: boolean;
   embedOnly?: boolean;
   clusterOnly?: boolean;
   /** Si true, borra product_key de todas las filas del artículo (ILIKE) en la ventana de días antes de DBSCAN. */
@@ -41,6 +45,10 @@ function cosineDistance(a: number[], b: number[]): number {
   const denom = Math.sqrt(na) * Math.sqrt(nb);
   if (denom <= 0) return 1;
   return 1 - dot / denom;
+}
+
+function cosineSimilarity(a: number[], b: number[]): number {
+  return 1 - cosineDistance(a, b);
 }
 
 function dbscanCosine(points: number[][], eps: number, minPts: number): number[] {
@@ -168,6 +176,83 @@ function mergeClustersByCentroid(
   return out;
 }
 
+/**
+ * Une clusters si el par de listados más parecido entre ambos tiene similitud coseno ≥ umbral.
+ * Evita splits cuando los centroides se “tiran” hacia otros productos pero dos títulos del mismo SKU siguen muy cercanos.
+ */
+function mergeClustersByMaxPairwiseSim(
+  labels: number[],
+  points: number[][],
+  mergeMinSimilarity: number,
+): number[] {
+  const n = labels.length;
+  const clusterIds = [...new Set(labels.filter((l) => l >= 0))].sort((a, b) => a - b);
+  if (clusterIds.length <= 1) return labels;
+
+  const byCluster = new Map<number, number[]>();
+  for (const c of clusterIds) byCluster.set(c, []);
+  for (let i = 0; i < n; i++) {
+    const L = labels[i]!;
+    if (L < 0) continue;
+    byCluster.get(L)!.push(i);
+  }
+
+  const parent = new Map<number, number>();
+  for (const c of clusterIds) parent.set(c, c);
+
+  function find(x: number): number {
+    let p = parent.get(x)!;
+    if (p !== x) {
+      p = find(p);
+      parent.set(x, p);
+    }
+    return p;
+  }
+  function union(a: number, b: number): void {
+    const ra = find(a);
+    const rb = find(b);
+    if (ra !== rb) parent.set(ra, rb);
+  }
+
+  for (let i = 0; i < clusterIds.length; i++) {
+    for (let j = i + 1; j < clusterIds.length; j++) {
+      const c1 = clusterIds[i]!;
+      const c2 = clusterIds[j]!;
+      const idx1 = byCluster.get(c1)!;
+      const idx2 = byCluster.get(c2)!;
+      let maxSim = -1;
+      for (const ia of idx1) {
+        const pa = points[ia]!;
+        for (const ib of idx2) {
+          const s = cosineSimilarity(pa, points[ib]!);
+          if (s > maxSim) maxSim = s;
+        }
+      }
+      if (maxSim >= mergeMinSimilarity) union(c1, c2);
+    }
+  }
+
+  const roots = new Set<number>();
+  for (const c of clusterIds) roots.add(find(c));
+  const sortedRoots = [...roots].sort((a, b) => a - b);
+  const rootToNew = new Map<number, number>();
+  sortedRoots.forEach((r, idx) => rootToNew.set(r, idx));
+
+  const out = [...labels];
+  for (let i = 0; i < n; i++) {
+    const L = labels[i]!;
+    if (L < 0) continue;
+    out[i] = rootToNew.get(find(L))!;
+  }
+  const merged = clusterIds.length - sortedRoots.length;
+  if (merged > 0) {
+    console.log(
+      `[cluster] fusión por par máximo entre clusters: ${clusterIds.length} → ${sortedRoots.length} (sim ≥ ${mergeMinSimilarity})`,
+    );
+  }
+  return out;
+}
+
 function parseVectorText(raw: string): number[] {
   const s = raw.trim();
   try {
@@ -223,6 +308,13 @@ function envCentroidMergeMinSimilarity(): number {
     : 0.92;
 }
 
+function envSkipPairwiseMerge(): boolean {
+  return (
+    process.env.CLUSTER_SKIP_PAIRWISE_MERGE === "1" ||
+    process.env.CLUSTER_SKIP_PAIRWISE_MERGE === "true"
+  );
+}
+
 async function runCluster(
   pool: Pool,
   opts: {
@@ -235,6 +327,8 @@ async function runCluster(
     resetArticleWindow: boolean;
     skipCentroidMerge: boolean;
     centroidMergeMinSimilarity: number;
+    skipPairwiseMerge: boolean;
+    pairwiseMergeMinSimilarity: number;
   },
 ): Promise<ClusterRunStats> {
   const eps = 1 - opts.minSimilarity;
@@ -313,6 +407,9 @@ async function runCluster(
   if (!opts.skipCentroidMerge) {
     labels = mergeClustersByCentroid(labels, points, opts.centroidMergeMinSimilarity);
   }
+  if (!opts.skipPairwiseMerge) {
+    labels = mergeClustersByMaxPairwiseSim(labels, points, opts.pairwiseMergeMinSimilarity);
+  }
   const slug = opts.article.replace(/\s+/g, "_").slice(0, 40);
 
   const client = await pool.connect();
@@ -368,6 +465,14 @@ function normalizeJobInput(raw: ProductClusteringJobInput): Required<
     Number.isFinite(parsedMerge) && parsedMerge > 0
       ? Math.min(0.999, Math.max(0.5, parsedMerge))
       : envCentroidMergeMinSimilarity();
+  const parsedPairwise =
+    raw.pairwiseMergeMinSimilarity !== undefined ? Number(raw.pairwiseMergeMinSimilarity) : NaN;
+  const pairwiseMergeMinSimilarity =
+    Number.isFinite(parsedPairwise) && parsedPairwise > 0
+      ? Math.min(0.999, Math.max(0.5, parsedPairwise))
+      : centroidMergeMinSimilarity;
+  const skipPairwiseMerge =
+    raw.skipPairwiseMerge === true ? true : raw.skipPairwiseMerge === false ? false : envSkipPairwiseMerge();
   return {
     article,
     days,
@@ -377,6 +482,8 @@ function normalizeJobInput(raw: ProductClusteringJobInput): Required<
     minPts,
     centroidMergeMinSimilarity,
     skipCentroidMerge,
+    pairwiseMergeMinSimilarity,
+    skipPairwiseMerge,
     embedOnly: Boolean(raw.embedOnly),
     clusterOnly: Boolean(raw.clusterOnly),
     resetArticleWindow: Boolean(raw.resetArticleWindow),
@@ -423,6 +530,8 @@ export async function runProductClusteringJob(
       resetArticleWindow: opts.resetArticleWindow,
       skipCentroidMerge: opts.skipCentroidMerge,
       centroidMergeMinSimilarity: opts.centroidMergeMinSimilarity,
+      skipPairwiseMerge: opts.skipPairwiseMerge,
+      pairwiseMergeMinSimilarity: opts.pairwiseMergeMinSimilarity,
     });
   }
 
@@ -438,6 +547,8 @@ export async function runProductClusteringJob(
     minPts: opts.minPts,
     centroidMergeMinSimilarity: opts.centroidMergeMinSimilarity,
     skipCentroidMerge: opts.skipCentroidMerge,
+    pairwiseMergeMinSimilarity: opts.pairwiseMergeMinSimilarity,
+    skipPairwiseMerge: opts.skipPairwiseMerge,
     resetArticleWindow: opts.resetArticleWindow,
     resetScope: opts.resetScope,
     durationMs: Date.now() - t0,

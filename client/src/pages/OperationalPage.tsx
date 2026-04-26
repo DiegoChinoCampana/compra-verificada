@@ -26,7 +26,9 @@ export function OperationalPage() {
   const [clusterMinSimilarity, setClusterMinSimilarity] = useState(0.9);
   const [clusterMinPts, setClusterMinPts] = useState(2);
   const [clusterCentroidMergeSim, setClusterCentroidMergeSim] = useState(0.92);
+  const [clusterPairwiseMergeSim, setClusterPairwiseMergeSim] = useState(0.86);
   const [clusterSkipCentroidMerge, setClusterSkipCentroidMerge] = useState(false);
+  const [clusterSkipPairwiseMerge, setClusterSkipPairwiseMerge] = useState(false);
   const [clusterLimit, setClusterLimit] = useState(8000);
   const [clusterBatchSize, setClusterBatchSize] = useState(40);
   const [clusterRunning, setClusterRunning] = useState(false);
@@ -91,6 +93,8 @@ export function OperationalPage() {
         minPts: clusterMinPts,
         centroidMergeMinSimilarity: clusterCentroidMergeSim,
         skipCentroidMerge: clusterSkipCentroidMerge,
+        pairwiseMergeMinSimilarity: clusterPairwiseMergeSim,
+        skipPairwiseMerge: clusterSkipPairwiseMerge,
         limit: clusterLimit,
         batchSize: clusterBatchSize,
       };
@@ -301,6 +305,23 @@ export function OperationalPage() {
                 Une clusters distintos si sus centroides son tan similares (0.88 = más uniones).
               </span>
             </label>
+            <label>
+              Fusión por par entre clusters — sim. mín.
+              <input
+                type="number"
+                min={0.5}
+                max={0.999}
+                step={0.01}
+                value={clusterPairwiseMergeSim}
+                onChange={(e) => setClusterPairwiseMergeSim(parseDecimalInput(e.target.value, 0.86))}
+                disabled={clusterSkipPairwiseMerge}
+              />
+              <span className="muted small" style={{ display: "block", marginTop: "0.2rem" }}>
+                Si el par de publicaciones más parecido entre dos clusters supera este umbral, se unen
+                (por defecto un poco más bajo que centroides, para casos tipo mismo modelo en clusters 2 y
+                7).
+              </span>
+            </label>
             <label style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
               <input
                 type="checkbox"
@@ -308,6 +329,14 @@ export function OperationalPage() {
                 onChange={(e) => setClusterSkipCentroidMerge(e.target.checked)}
               />
               Desactivar fusión por centroides
+            </label>
+            <label style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+              <input
+                type="checkbox"
+                checked={clusterSkipPairwiseMerge}
+                onChange={(e) => setClusterSkipPairwiseMerge(e.target.checked)}
+              />
+              Desactivar fusión por par entre clusters
             </label>
             <label>
               Límite de filas (embed + cluster)
@@ -415,6 +444,11 @@ export function OperationalPage() {
               ? " · sin fusión centroides"
               : clusterMeta.lastRun.centroidMergeMinSimilarity != null
                 ? ` · fusión centroides sim ≥ ${clusterMeta.lastRun.centroidMergeMinSimilarity}`
+                : ""}
+            {clusterMeta.lastRun.skipPairwiseMerge
+              ? " · sin fusión por par"
+              : clusterMeta.lastRun.pairwiseMergeMinSimilarity != null
+                ? ` · fusión par sim ≥ ${clusterMeta.lastRun.pairwiseMergeMinSimilarity}`
                 : ""}{" "}
             · {(clusterMeta.lastRun.durationMs / 1000).toFixed(1)}s
           </p>

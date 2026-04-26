@@ -396,6 +396,8 @@ type ClusterRunBody = {
   minPts?: unknown;
   centroidMergeMinSimilarity?: unknown;
   skipCentroidMerge?: unknown;
+  pairwiseMergeMinSimilarity?: unknown;
+  skipPairwiseMerge?: unknown;
   embedOnly?: unknown;
   clusterOnly?: unknown;
   resetArticleWindow?: unknown;
@@ -432,6 +434,16 @@ analyticsRouter.post("/operational/product-clustering-run", async (req, res) => 
         body.skipCentroidMerge === true
           ? true
           : body.skipCentroidMerge === false
+            ? false
+            : undefined,
+      pairwiseMergeMinSimilarity:
+        body.pairwiseMergeMinSimilarity !== undefined
+          ? Number(body.pairwiseMergeMinSimilarity)
+          : undefined,
+      skipPairwiseMerge:
+        body.skipPairwiseMerge === true
+          ? true
+          : body.skipPairwiseMerge === false
             ? false
             : undefined,
       embedOnly: body.embedOnly === true,

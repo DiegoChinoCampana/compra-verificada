@@ -20,6 +20,10 @@ export type ClusterBatchMetaPayload = {
   skipCentroidMerge?: boolean;
   /** Si true, se limpiaron claves en todo el artículo+ventana antes de agrupar. */
   resetArticleWindow?: boolean;
+  /** Si true, no se aplicó fusión por similitud máxima entre pares de listados de distintos clusters. */
+  skipPairwiseMerge?: boolean;
+  /** Umbral usado en fusión por par máximo (si no se omite). */
+  pairwiseMergeMinSimilarity?: number;
   resetScope: boolean;
   durationMs: number;
 };
