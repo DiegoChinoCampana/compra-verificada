@@ -32,6 +32,12 @@ function openAiKey(): string | null {
   return k && k.length > 0 ? k : null;
 }
 
+/** Opcional: cabecera `OpenAI-Project` para claves ligadas a un proyecto. */
+function openAiProjectId(): string | null {
+  const p = process.env.OPENAI_PROJECT_ID?.trim();
+  return p && p.length > 0 ? p : null;
+}
+
 /** Para UI / meta: saber si va a poder embeddear (sin revelar la clave). */
 export function isOpenAiApiKeyConfigured(): boolean {
   return openAiKey() != null;
@@ -63,12 +69,16 @@ export async function fetchEmbeddingsBatch(inputs: string[]): Promise<number[][]
     body.dimensions = dimensions;
   }
 
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${key}`,
+    "Content-Type": "application/json",
+  };
+  const project = openAiProjectId();
+  if (project) headers["OpenAI-Project"] = project;
+
   const res = await fetch(url, {
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${key}`,
-      "Content-Type": "application/json",
-    },
+    headers,
     body: JSON.stringify(body),
   });
 
