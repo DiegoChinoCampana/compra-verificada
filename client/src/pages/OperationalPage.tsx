@@ -3,6 +3,14 @@ import { Link } from "react-router-dom";
 import { fetchJson } from "../api";
 import type { Article, ProductClusteringMetaPayload, ProductClusteringRunResponse } from "../types";
 
+/** Acepta coma decimal (p. ej. teclado es-AR) en inputs controlados. */
+function parseDecimalInput(raw: string, fallback: number): number {
+  const t = raw.trim().replace(",", ".");
+  if (t === "" || t === "-" || t === ".") return fallback;
+  const n = Number(t);
+  return Number.isFinite(n) ? n : fallback;
+}
+
 export function OperationalPage() {
   const [stale, setStale] = useState<Article[]>([]);
   const [missing, setMissing] = useState<Article[]>([]);
@@ -112,8 +120,12 @@ export function OperationalPage() {
         r.clusteredRows > 0
           ? ` Solo esas ${r.clusteredRows} filas (con embedding en el universo del batch) tienen o actualizan product_key; el resto de resultados sigue sin clave hasta tener embedding.`
           : "";
+      const embedZeroNote =
+        clusterMode !== "cluster" && r.embedded === 0 && r.clusteredRows > 0
+          ? " Embeddings nuevos: 0 porque en artículo+ventana no había filas con título sin vector en result_embeddings (en ese corte ya estaban embedidas, o no hay listados que cumplan el filtro). No es un error."
+          : "";
       setClusterRunOk(
-        `Listo en ${(r.durationMs / 1000).toFixed(1)}s · embeddings escritos: ${r.embedded} · filas procesadas en cluster: ${r.clusteredRows} (en clúster: ${r.inCluster}, ruido: ${r.noise}).${tail}${refreshHint}${scopeHint}`,
+        `Listo en ${(r.durationMs / 1000).toFixed(1)}s · embeddings escritos: ${r.embedded} · filas procesadas en cluster: ${r.clusteredRows} (en clúster: ${r.inCluster}, ruido: ${r.noise}).${tail}${embedZeroNote}${refreshHint}${scopeHint}`,
       );
       const meta = await fetchJson<ProductClusteringMetaPayload>(
         `/api/analytics/operational/product-clustering-meta`,
@@ -212,6 +224,10 @@ export function OperationalPage() {
                 <option value="embed">Solo embeddings</option>
                 <option value="cluster">Solo clustering</option>
               </select>
+              <span className="muted small" style={{ display: "block", marginTop: "0.2rem" }}>
+                En «Completo», si ves <strong>embeddings escritos: 0</strong>, en ese artículo y ventana no
+                quedaban listados con título pendientes de vector (no indica fallo).
+              </span>
             </label>
             <label style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
               <input
@@ -229,7 +245,7 @@ export function OperationalPage() {
                 max={0.999}
                 step={0.01}
                 value={clusterMinSimilarity}
-                onChange={(e) => setClusterMinSimilarity(Number(e.target.value) || 0.9)}
+                onChange={(e) => setClusterMinSimilarity(parseDecimalInput(e.target.value, 0.9))}
               />
               <span className="muted small" style={{ display: "block", marginTop: "0.2rem" }}>
                 Umbral coseno entre listados del mismo cluster (por defecto 0.9).
@@ -254,7 +270,7 @@ export function OperationalPage() {
                 max={0.999}
                 step={0.01}
                 value={clusterCentroidMergeSim}
-                onChange={(e) => setClusterCentroidMergeSim(Number(e.target.value) || 0.92)}
+                onChange={(e) => setClusterCentroidMergeSim(parseDecimalInput(e.target.value, 0.92))}
                 disabled={clusterSkipCentroidMerge}
               />
               <span className="muted small" style={{ display: "block", marginTop: "0.2rem" }}>
