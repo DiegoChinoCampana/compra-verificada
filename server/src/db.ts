@@ -82,13 +82,29 @@ export const pool = new Pool(poolConfig);
  * El SQL viene embebido en build (`schemaSql.generated.ts`) para Vercel/serverless.
  * La base de datos en sí debe existir (ver `npm run db:ensure`).
  */
+function isOptionalVectorSchemaStatement(sql: string): boolean {
+  const s = sql.trim();
+  return (
+    /^CREATE\s+EXTENSION\b/i.test(s) ||
+    /^CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?result_embeddings\b/i.test(s)
+  );
+}
+
 export async function ensureSchema(): Promise<void> {
   if (process.env.SKIP_DB_SCHEMA === "true" || process.env.SKIP_DB_SCHEMA === "1") {
     console.log("[db] SKIP_DB_SCHEMA: no se aplica db/schema.sql");
     return;
   }
   for (const stmt of IPC_SCHEMA_STATEMENTS) {
-    await pool.query(stmt);
+    try {
+      await pool.query(stmt);
+    } catch (e) {
+      if (!isOptionalVectorSchemaStatement(stmt)) throw e;
+      console.warn(
+        "[db] Esquema opcional (vector/embeddings) omitido o falló — el resto del IPC sigue activo:",
+        String(e),
+      );
+    }
   }
   console.log("[db] Esquema IPC aplicado (tablas + configs por defecto).");
 }
