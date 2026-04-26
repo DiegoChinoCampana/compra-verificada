@@ -3,6 +3,8 @@ import type { Recommendation } from "./types";
 /** Suaviza términos internos en textos generados por el motor de recomendación. */
 export function softenRecommendationCopy(detail: string): string {
   return detail
+    /* Antes que «La última corrida» (case-insensitive) no matchee dentro de «En la última corrida». */
+    .replace(/\bEn la última corrida\b/gi, "En la última actualización")
     .replace(/\bLa última corrida\b/gi, "En la última actualización")
     .replace(/\búltima corrida\b/gi, "última actualización")
     .replace(/\bentre corridas\b/gi, "entre actualizaciones")
