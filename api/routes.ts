@@ -22,7 +22,10 @@ export default function handler(_req: VercelRequest, res: VercelResponse): void 
       },
       { ruta: "/api/analytics/peers/by-article-detail", descripcion: "Express — peers" },
       { ruta: "/api/analytics/operational/*", descripcion: "Express — operación" },
-      { ruta: "/api/report/*", descripcion: "Express — informe" },
+      {
+        ruta: "/api/report/article/:articleId",
+        descripcion: "Express — informe / resumen (handler dedicado Vercel)",
+      },
       { ruta: "/api/analysis/*", descripcion: "Express — análisis" },
       {
         ruta: "/api/[...slug]",
