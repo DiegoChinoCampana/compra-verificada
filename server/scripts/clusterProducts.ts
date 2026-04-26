@@ -4,7 +4,7 @@
  * Uso (desde carpeta `server/`, con .env cargado):
  *   npx tsx scripts/clusterProducts.ts --article=Microondas --days=60
  *   npx tsx scripts/clusterProducts.ts --article=Colchón --days=30 --embed-only
- *   npx tsx scripts/clusterProducts.ts --article=TV --days=45 --cluster-only --similarity=0.9 --min-pts=3
+ *   npx tsx scripts/clusterProducts.ts --article=TV --days=45 --cluster-only --similarity=0.9 --min-pts=2
  *
  * Requiere: PostgreSQL con extensión `vector`, OPENAI_API_KEY, columnas aplicadas (ensureSchema / schema.sql).
  */
@@ -37,7 +37,7 @@ async function main(): Promise<void> {
   const limit = Math.min(20_000, Math.max(100, Number(argValue("limit") ?? "8000")));
   const batchSize = Math.min(100, Math.max(1, Number(argValue("batch-size") ?? "40")));
   const minSimilarity = Math.min(0.999, Math.max(0.5, Number(argValue("similarity") ?? "0.9")));
-  const minPts = Math.min(20, Math.max(2, Number(argValue("min-pts") ?? "3")));
+  const minPts = Math.min(20, Math.max(2, Number(argValue("min-pts") ?? "2")));
   const embedOnly = hasFlag("embed-only");
   const clusterOnly = hasFlag("cluster-only");
   const resetScope = hasFlag("reset-scope");

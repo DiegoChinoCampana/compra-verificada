@@ -83,6 +83,85 @@ function dbscanCosine(points: number[][], eps: number, minPts: number): number[]
   return labels;
 }
 
+/**
+ * Tras DBSCAN, une componentes cuyos **centroides** tienen similitud coseno ≥ umbral.
+ * Evita que dos listados casi idénticos queden en clusters distintos por cortes de densidad.
+ */
+function mergeClustersByCentroid(
+  labels: number[],
+  points: number[][],
+  mergeMinSimilarity: number,
+): number[] {
+  const n = labels.length;
+  const clusterIds = [...new Set(labels.filter((l) => l >= 0))].sort((a, b) => a - b);
+  if (clusterIds.length <= 1) return labels;
+
+  const mergeDistMax = 1 - mergeMinSimilarity;
+  const dim = points[0]!.length;
+
+  function centroidFor(clusterId: number): number[] {
+    const acc = new Array(dim).fill(0);
+    let cnt = 0;
+    for (let i = 0; i < n; i++) {
+      if (labels[i] !== clusterId) continue;
+      cnt++;
+      for (let d = 0; d < dim; d++) acc[d] += points[i]![d]!;
+    }
+    if (cnt === 0) return acc;
+    return acc.map((x) => x / cnt);
+  }
+
+  const centroids = new Map<number, number[]>();
+  for (const c of clusterIds) centroids.set(c, centroidFor(c));
+
+  const parent = new Map<number, number>();
+  for (const c of clusterIds) parent.set(c, c);
+
+  function find(x: number): number {
+    let p = parent.get(x)!;
+    if (p !== x) {
+      p = find(p);
+      parent.set(x, p);
+    }
+    return p;
+  }
+  function union(a: number, b: number): void {
+    const ra = find(a);
+    const rb = find(b);
+    if (ra !== rb) parent.set(ra, rb);
+  }
+
+  for (let i = 0; i < clusterIds.length; i++) {
+    for (let j = i + 1; j < clusterIds.length; j++) {
+      const c1 = clusterIds[i]!;
+      const c2 = clusterIds[j]!;
+      const u = centroids.get(c1)!;
+      const v = centroids.get(c2)!;
+      if (cosineDistance(u, v) <= mergeDistMax) union(c1, c2);
+    }
+  }
+
+  const roots = new Set<number>();
+  for (const c of clusterIds) roots.add(find(c));
+  const sortedRoots = [...roots].sort((a, b) => a - b);
+  const rootToNew = new Map<number, number>();
+  sortedRoots.forEach((r, idx) => rootToNew.set(r, idx));
+
+  const out = [...labels];
+  for (let i = 0; i < n; i++) {
+    const L = labels[i]!;
+    if (L < 0) continue;
+    out[i] = rootToNew.get(find(L))!;
+  }
+  const mergedPairs = clusterIds.length - sortedRoots.length;
+  if (mergedPairs > 0) {
+    console.log(
+      `[cluster] fusión por centroides: ${clusterIds.length} → ${sortedRoots.length} clusters (sim ≥ ${mergeMinSimilarity})`,
+    );
+  }
+  return out;
+}
+
 function parseVectorText(raw: string): number[] {
   const s = raw.trim();
   try {
@@ -184,7 +263,19 @@ async function runCluster(
     console.log(`[cluster] reset de claves en ${ids.length} filas a agrupar.`);
   }
 
-  const labels = dbscanCosine(points, eps, opts.minPts);
+  let labels = dbscanCosine(points, eps, opts.minPts);
+  const skipMerge =
+    process.env.CLUSTER_SKIP_CENTROID_MERGE === "1" ||
+    process.env.CLUSTER_SKIP_CENTROID_MERGE === "true";
+  if (!skipMerge) {
+    const rawMerge = process.env.CLUSTER_CENTROID_MERGE_MIN_SIMILARITY?.trim();
+    const parsed = rawMerge ? Number(rawMerge) : NaN;
+    const mergeMinSim =
+      Number.isFinite(parsed) && parsed > 0
+        ? Math.min(0.999, Math.max(0.5, parsed))
+        : 0.92;
+    labels = mergeClustersByCentroid(labels, points, mergeMinSim);
+  }
   const slug = opts.article.replace(/\s+/g, "_").slice(0, 40);
 
   const client = await pool.connect();
@@ -231,7 +322,7 @@ function normalizeJobInput(raw: ProductClusteringJobInput): Required<
   const limit = Math.min(20_000, Math.max(100, Number(raw.limit ?? 8000)));
   const batchSize = Math.min(100, Math.max(1, Number(raw.batchSize ?? 40)));
   const minSimilarity = Math.min(0.999, Math.max(0.5, Number(raw.minSimilarity ?? 0.9)));
-  const minPts = Math.min(20, Math.max(2, Number(raw.minPts ?? 3)));
+  const minPts = Math.min(20, Math.max(2, Number(raw.minPts ?? 2)));
   return {
     article,
     days,
