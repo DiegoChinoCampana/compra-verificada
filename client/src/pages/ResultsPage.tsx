@@ -30,6 +30,8 @@ export function ResultsPage() {
   const [payload, setPayload] = useState<ScrapedResultsPagePayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  /** Fuerza otra petición sin cambiar filtros (p. ej. tras clustering en otra pestaña). */
+  const [reloadNonce, setReloadNonce] = useState(0);
 
   useEffect(() => {
     setFilters(filtersFromParams(params));
@@ -55,7 +57,7 @@ export function ResultsPage() {
     return () => {
       cancelled = true;
     };
-  }, [params]);
+  }, [params, reloadNonce]);
 
   function applyFilters(e: FormEvent) {
     e.preventDefault();
@@ -140,6 +142,9 @@ export function ResultsPage() {
         </div>
         <div className="form-actions">
           <button type="submit">Aplicar filtros</button>
+          <button type="button" onClick={() => setReloadNonce((n) => n + 1)} disabled={loading}>
+            Recargar datos
+          </button>
         </div>
       </form>
 

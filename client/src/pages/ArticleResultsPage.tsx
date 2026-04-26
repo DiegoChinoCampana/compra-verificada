@@ -32,6 +32,7 @@ export function ArticleResultsPage() {
   const [article, setArticle] = useState<Article | null>(null);
   const [payload, setPayload] = useState<ArticleResultsPagePayload | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [reloadNonce, setReloadNonce] = useState(0);
 
   const pt = params.get("productTitle")?.trim() ?? "";
   const sl = params.get("seller")?.trim() ?? "";
@@ -66,7 +67,7 @@ export function ArticleResultsPage() {
       }
     })();
     return () => ac.abort();
-  }, [articleId, qs]);
+  }, [articleId, qs, reloadNonce]);
 
   function goToPage(next: number) {
     const p = new URLSearchParams(params);
@@ -122,7 +123,10 @@ export function ArticleResultsPage() {
       </header>
 
       <p className="muted small" style={{ marginBottom: "0.75rem" }}>
-        Mostrando {from}–{to} de {payload.total} · Página {page} de {totalPages}
+        Mostrando {from}–{to} de {payload.total} · Página {page} de {totalPages}{" "}
+        <button type="button" onClick={() => setReloadNonce((n) => n + 1)} style={{ marginLeft: "0.35rem" }}>
+          Recargar datos
+        </button>
       </p>
 
       <div className="table-wrap card">

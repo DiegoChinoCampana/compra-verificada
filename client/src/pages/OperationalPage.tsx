@@ -104,8 +104,16 @@ export function OperationalPage() {
         r.embedded === 0 && r.clusteredRows === 0
           ? " No hubo filas nuevas para embed ni embeddings en la ventana para agrupar (revisá artículo / días o ejecutá solo «embed» primero)."
           : "";
+      const refreshHint =
+        r.embedded > 0 || r.clusteredRows > 0
+          ? " En Resultados / listados, usá «Recargar datos» o F5: la tabla no se actualiza sola."
+          : "";
+      const scopeHint =
+        r.clusteredRows > 0
+          ? ` Solo esas ${r.clusteredRows} filas (con embedding en el universo del batch) tienen o actualizan product_key; el resto de resultados sigue sin clave hasta tener embedding.`
+          : "";
       setClusterRunOk(
-        `Listo en ${(r.durationMs / 1000).toFixed(1)}s · embeddings escritos: ${r.embedded} · filas procesadas en cluster: ${r.clusteredRows} (en clúster: ${r.inCluster}, ruido: ${r.noise}).${tail}`,
+        `Listo en ${(r.durationMs / 1000).toFixed(1)}s · embeddings escritos: ${r.embedded} · filas procesadas en cluster: ${r.clusteredRows} (en clúster: ${r.inCluster}, ruido: ${r.noise}).${tail}${refreshHint}${scopeHint}`,
       );
       const meta = await fetchJson<ProductClusteringMetaPayload>(
         `/api/analytics/operational/product-clustering-meta`,
