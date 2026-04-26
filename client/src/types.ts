@@ -130,6 +130,8 @@ export type ProductClusteringMetaPayload = {
     noise: number;
     minSimilarity: number;
     minPts: number;
+    centroidMergeMinSimilarity?: number;
+    skipCentroidMerge?: boolean;
     resetScope: boolean;
     durationMs: number;
   } | null;

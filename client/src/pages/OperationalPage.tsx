@@ -14,6 +14,12 @@ export function OperationalPage() {
   const [clusterSecret, setClusterSecret] = useState("");
   const [clusterMode, setClusterMode] = useState<"full" | "embed" | "cluster">("full");
   const [clusterReset, setClusterReset] = useState(false);
+  const [clusterMinSimilarity, setClusterMinSimilarity] = useState(0.9);
+  const [clusterMinPts, setClusterMinPts] = useState(2);
+  const [clusterCentroidMergeSim, setClusterCentroidMergeSim] = useState(0.92);
+  const [clusterSkipCentroidMerge, setClusterSkipCentroidMerge] = useState(false);
+  const [clusterLimit, setClusterLimit] = useState(8000);
+  const [clusterBatchSize, setClusterBatchSize] = useState(40);
   const [clusterRunning, setClusterRunning] = useState(false);
   const [clusterRunError, setClusterRunError] = useState<string | null>(null);
   const [clusterRunOk, setClusterRunOk] = useState<string | null>(null);
@@ -71,6 +77,12 @@ export function OperationalPage() {
         resetScope: clusterReset,
         embedOnly: clusterMode === "embed",
         clusterOnly: clusterMode === "cluster",
+        minSimilarity: clusterMinSimilarity,
+        minPts: clusterMinPts,
+        centroidMergeMinSimilarity: clusterCentroidMergeSim,
+        skipCentroidMerge: clusterSkipCentroidMerge,
+        limit: clusterLimit,
+        batchSize: clusterBatchSize,
       };
       if (clusterSecret.trim()) body.secret = clusterSecret.trim();
 
@@ -197,6 +209,76 @@ export function OperationalPage() {
               Resetear claves en el universo antes de agrupar
             </label>
             <label>
+              Similitud mín. vecinos (DBSCAN)
+              <input
+                type="number"
+                min={0.5}
+                max={0.999}
+                step={0.01}
+                value={clusterMinSimilarity}
+                onChange={(e) => setClusterMinSimilarity(Number(e.target.value) || 0.9)}
+              />
+              <span className="muted small" style={{ display: "block", marginTop: "0.2rem" }}>
+                Umbral coseno entre listados del mismo cluster (por defecto 0.9).
+              </span>
+            </label>
+            <label>
+              minPts (DBSCAN)
+              <input
+                type="number"
+                min={2}
+                max={20}
+                step={1}
+                value={clusterMinPts}
+                onChange={(e) => setClusterMinPts(Math.round(Number(e.target.value)) || 2)}
+              />
+            </label>
+            <label>
+              Fusión por centroides — sim. mín.
+              <input
+                type="number"
+                min={0.5}
+                max={0.999}
+                step={0.01}
+                value={clusterCentroidMergeSim}
+                onChange={(e) => setClusterCentroidMergeSim(Number(e.target.value) || 0.92)}
+                disabled={clusterSkipCentroidMerge}
+              />
+              <span className="muted small" style={{ display: "block", marginTop: "0.2rem" }}>
+                Une clusters distintos si sus centroides son tan similares (0.88 = más uniones).
+              </span>
+            </label>
+            <label style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+              <input
+                type="checkbox"
+                checked={clusterSkipCentroidMerge}
+                onChange={(e) => setClusterSkipCentroidMerge(e.target.checked)}
+              />
+              Desactivar fusión por centroides
+            </label>
+            <label>
+              Límite de filas (embed + cluster)
+              <input
+                type="number"
+                min={100}
+                max={20000}
+                step={100}
+                value={clusterLimit}
+                onChange={(e) => setClusterLimit(Math.round(Number(e.target.value)) || 8000)}
+              />
+            </label>
+            <label>
+              Tamaño de lote embeddings
+              <input
+                type="number"
+                min={1}
+                max={100}
+                step={1}
+                value={clusterBatchSize}
+                onChange={(e) => setClusterBatchSize(Math.round(Number(e.target.value)) || 40)}
+              />
+            </label>
+            <label>
               Token <span className="muted">(si aplica)</span>
               <input
                 type="password"
@@ -264,8 +346,13 @@ export function OperationalPage() {
             {clusterMeta.lastRun.embedded} · filas agrupadas {clusterMeta.lastRun.clusteredRows}{" "}
             (en clúster {clusterMeta.lastRun.inCluster}, ruido {clusterMeta.lastRun.noise}) · sim ≥{" "}
             {clusterMeta.lastRun.minSimilarity} · minPts {clusterMeta.lastRun.minPts}
-            {clusterMeta.lastRun.resetScope ? " · con reset" : ""} ·{" "}
-            {(clusterMeta.lastRun.durationMs / 1000).toFixed(1)}s
+            {clusterMeta.lastRun.resetScope ? " · con reset" : ""}
+            {clusterMeta.lastRun.skipCentroidMerge
+              ? " · sin fusión centroides"
+              : clusterMeta.lastRun.centroidMergeMinSimilarity != null
+                ? ` · fusión centroides sim ≥ ${clusterMeta.lastRun.centroidMergeMinSimilarity}`
+                : ""}{" "}
+            · {(clusterMeta.lastRun.durationMs / 1000).toFixed(1)}s
           </p>
         ) : (
           <p className="muted small" style={{ marginTop: "0.75rem" }}>

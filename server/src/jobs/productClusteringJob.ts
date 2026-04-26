@@ -15,6 +15,10 @@ export type ProductClusteringJobInput = {
   batchSize?: number;
   minSimilarity?: number;
   minPts?: number;
+  /** Similitud mínima entre centroides (0.5–0.999). Si no se envía, se usa env o 0.92. */
+  centroidMergeMinSimilarity?: number;
+  /** Si no se envía, se respeta `CLUSTER_SKIP_CENTROID_MERGE` en el servidor. */
+  skipCentroidMerge?: boolean;
   embedOnly?: boolean;
   clusterOnly?: boolean;
   resetScope?: boolean;
@@ -202,6 +206,21 @@ async function runEmbed(
   return done;
 }
 
+function envSkipCentroidMerge(): boolean {
+  return (
+    process.env.CLUSTER_SKIP_CENTROID_MERGE === "1" ||
+    process.env.CLUSTER_SKIP_CENTROID_MERGE === "true"
+  );
+}
+
+function envCentroidMergeMinSimilarity(): number {
+  const rawMerge = process.env.CLUSTER_CENTROID_MERGE_MIN_SIMILARITY?.trim();
+  const parsed = rawMerge ? Number(rawMerge) : NaN;
+  return Number.isFinite(parsed) && parsed > 0
+    ? Math.min(0.999, Math.max(0.5, parsed))
+    : 0.92;
+}
+
 async function runCluster(
   pool: Pool,
   opts: {
@@ -211,6 +230,8 @@ async function runCluster(
     minSimilarity: number;
     minPts: number;
     resetScope: boolean;
+    skipCentroidMerge: boolean;
+    centroidMergeMinSimilarity: number;
   },
 ): Promise<ClusterRunStats> {
   const eps = 1 - opts.minSimilarity;
@@ -264,17 +285,8 @@ async function runCluster(
   }
 
   let labels = dbscanCosine(points, eps, opts.minPts);
-  const skipMerge =
-    process.env.CLUSTER_SKIP_CENTROID_MERGE === "1" ||
-    process.env.CLUSTER_SKIP_CENTROID_MERGE === "true";
-  if (!skipMerge) {
-    const rawMerge = process.env.CLUSTER_CENTROID_MERGE_MIN_SIMILARITY?.trim();
-    const parsed = rawMerge ? Number(rawMerge) : NaN;
-    const mergeMinSim =
-      Number.isFinite(parsed) && parsed > 0
-        ? Math.min(0.999, Math.max(0.5, parsed))
-        : 0.92;
-    labels = mergeClustersByCentroid(labels, points, mergeMinSim);
+  if (!opts.skipCentroidMerge) {
+    labels = mergeClustersByCentroid(labels, points, opts.centroidMergeMinSimilarity);
   }
   const slug = opts.article.replace(/\s+/g, "_").slice(0, 40);
 
@@ -323,6 +335,14 @@ function normalizeJobInput(raw: ProductClusteringJobInput): Required<
   const batchSize = Math.min(100, Math.max(1, Number(raw.batchSize ?? 40)));
   const minSimilarity = Math.min(0.999, Math.max(0.5, Number(raw.minSimilarity ?? 0.9)));
   const minPts = Math.min(20, Math.max(2, Number(raw.minPts ?? 2)));
+  const skipCentroidMerge =
+    raw.skipCentroidMerge === true ? true : raw.skipCentroidMerge === false ? false : envSkipCentroidMerge();
+  const parsedMerge =
+    raw.centroidMergeMinSimilarity !== undefined ? Number(raw.centroidMergeMinSimilarity) : NaN;
+  const centroidMergeMinSimilarity =
+    Number.isFinite(parsedMerge) && parsedMerge > 0
+      ? Math.min(0.999, Math.max(0.5, parsedMerge))
+      : envCentroidMergeMinSimilarity();
   return {
     article,
     days,
@@ -330,6 +350,8 @@ function normalizeJobInput(raw: ProductClusteringJobInput): Required<
     batchSize,
     minSimilarity,
     minPts,
+    centroidMergeMinSimilarity,
+    skipCentroidMerge,
     embedOnly: Boolean(raw.embedOnly),
     clusterOnly: Boolean(raw.clusterOnly),
     resetScope: Boolean(raw.resetScope),
@@ -372,6 +394,8 @@ export async function runProductClusteringJob(
       minSimilarity: opts.minSimilarity,
       minPts: opts.minPts,
       resetScope: opts.resetScope,
+      skipCentroidMerge: opts.skipCentroidMerge,
+      centroidMergeMinSimilarity: opts.centroidMergeMinSimilarity,
     });
   }
 
@@ -385,6 +409,8 @@ export async function runProductClusteringJob(
     noise: clusterStats.noise,
     minSimilarity: opts.minSimilarity,
     minPts: opts.minPts,
+    centroidMergeMinSimilarity: opts.centroidMergeMinSimilarity,
+    skipCentroidMerge: opts.skipCentroidMerge,
     resetScope: opts.resetScope,
     durationMs: Date.now() - t0,
   };

@@ -394,6 +394,8 @@ type ClusterRunBody = {
   batchSize?: unknown;
   minSimilarity?: unknown;
   minPts?: unknown;
+  centroidMergeMinSimilarity?: unknown;
+  skipCentroidMerge?: unknown;
   embedOnly?: unknown;
   clusterOnly?: unknown;
   resetScope?: unknown;
@@ -421,6 +423,16 @@ analyticsRouter.post("/operational/product-clustering-run", async (req, res) => 
       batchSize: body.batchSize !== undefined ? Number(body.batchSize) : undefined,
       minSimilarity: body.minSimilarity !== undefined ? Number(body.minSimilarity) : undefined,
       minPts: body.minPts !== undefined ? Number(body.minPts) : undefined,
+      centroidMergeMinSimilarity:
+        body.centroidMergeMinSimilarity !== undefined
+          ? Number(body.centroidMergeMinSimilarity)
+          : undefined,
+      skipCentroidMerge:
+        body.skipCentroidMerge === true
+          ? true
+          : body.skipCentroidMerge === false
+            ? false
+            : undefined,
       embedOnly: body.embedOnly === true,
       clusterOnly: body.clusterOnly === true,
       resetScope: body.resetScope === true,

@@ -14,6 +14,10 @@ export type ClusterBatchMetaPayload = {
   noise: number;
   minSimilarity: number;
   minPts: number;
+  /** Similitud mínima entre centroides para fusionar clusters post-DBSCAN. */
+  centroidMergeMinSimilarity?: number;
+  /** Si true, no se aplica la fusión por centroides. */
+  skipCentroidMerge?: boolean;
   resetScope: boolean;
   durationMs: number;
 };
