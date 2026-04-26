@@ -16,6 +16,7 @@ export type Html2PdfSetOptions = {
     format?: string | [number, number];
     orientation?: "portrait" | "landscape";
   };
+  /** Pasá `{ mode: [] }` para desactivar el plugin de saltos (evita glitches con el clon). */
   pagebreak?: {
     mode?: string | string[];
     before?: string | string[];
