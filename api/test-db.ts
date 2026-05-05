@@ -13,6 +13,17 @@ export default async function handler(
     return;
   }
 
+  /** Si hay proxy a Spring, este endpoint no aplica: la base no es accesible desde Vercel. */
+  if (process.env.CV_UPSTREAM_API?.trim()) {
+    res.status(200).json({
+      status: "proxy_mode",
+      mensaje:
+        "test-db deshabilitado: la base solo es accesible desde el Tomcat (Spring). Probá /api/health.",
+      upstream: process.env.CV_UPSTREAM_API,
+    });
+    return;
+  }
+
   const inicioTotal = Date.now();
   const tiempos = { conexion: 0, consulta: 0, total: 0 };
 

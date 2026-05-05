@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>com.compraverificada</groupId>
+  <artifactId>compra-verificada-api</artifactId>
+  <version>1.0.0</version>
+  <!--
+    WAR para deploy en un Tomcat externo (la base remota acepta conexiones
+    solo desde el host del Tomcat, así no queda expuesta al resto de la red).
+    Si querés correr embebido para pruebas: mvn spring-boot:run.
+  -->
+  <packaging>war</packaging>
+  <name>compra-verificada-api</name>
+  <description>API CompraVerificada (Spring Boot, deploy en Tomcat) que aísla la base remota.</description>
+
+  <parent>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-parent</artifactId>
+    <version>3.3.5</version>
+    <relativePath/>
+  </parent>
+
+  <properties>
+    <java.version>17</java.version>
+    <maven.compiler.release>17</maven.compiler.release>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <postgresql.version>42.7.4</postgresql.version>
+  </properties>
+
+  <dependencies>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-web</artifactId>
+    </dependency>
+
+    <!--
+      Tomcat embebido en scope `provided`:
+      - mvn package → no entra en el WAR (lo provee el Tomcat externo, sea Windows o el local).
+      - mvn spring-boot:run → sí está disponible (útil para iterar sin desplegar).
+    -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-tomcat</artifactId>
+      <scope>provided</scope>
+    </dependency>
+
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-jdbc</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-validation</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>org.postgresql</groupId>
+      <artifactId>postgresql</artifactId>
+      <version>${postgresql.version}</version>
+    </dependency>
+
+    <!-- Para empaquetar como WAR y desplegar en Tomcat externo -->
+    <dependency>
+      <groupId>jakarta.servlet</groupId>
+      <artifactId>jakarta.servlet-api</artifactId>
+      <scope>provided</scope>
+    </dependency>
+
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <!--
+      finalName=api → el WAR se publica como `api.war`.
+      Cuando lo dejás en `webapps/` de Tomcat (local o el de Windows), el context path queda en
+      `/api`, así las URLs finales son `http://host:puerto/api/articles`, etc. — idénticas a las del
+      backend Node y a las que ya consume el front (`/api/...`).
+    -->
+    <finalName>api</finalName>
+    <plugins>
+      <plugin>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-maven-plugin</artifactId>
+      </plugin>
+    </plugins>
+  </build>
+</project>

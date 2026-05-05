@@ -9,7 +9,16 @@ dotenv.config({ path: path.join(__dirname, "..", ".env") });
 
 const { Pool } = pg;
 
+/** Si hay un upstream Spring configurado, todo el SQL se delega y la base no se toca acá. */
+function proxyMode(): boolean {
+  return Boolean(process.env.CV_UPSTREAM_API?.trim());
+}
+
 function connectionString(): string {
+  if (proxyMode()) {
+    /** Placeholder: se setea para que `new Pool(...)` no falle, pero `pool.query` nunca corre. */
+    return "postgresql://proxy:proxy@127.0.0.1:5432/proxy";
+  }
   if (process.env.VERCEL) {
     const hasUrl = Boolean(process.env.DATABASE_URL?.trim());
     const hasHost = Boolean(process.env.DB_HOST?.trim());
@@ -91,6 +100,10 @@ function isOptionalVectorSchemaStatement(sql: string): boolean {
 }
 
 export async function ensureSchema(): Promise<void> {
+  if (proxyMode()) {
+    console.log("[db] CV_UPSTREAM_API definido: modo proxy a Spring; no se aplica db/schema.sql");
+    return;
+  }
   if (process.env.SKIP_DB_SCHEMA === "true" || process.env.SKIP_DB_SCHEMA === "1") {
     console.log("[db] SKIP_DB_SCHEMA: no se aplica db/schema.sql");
     return;

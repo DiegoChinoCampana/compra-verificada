@@ -23,6 +23,10 @@ export default function handler(req: VercelRequest, res: VercelResponse): void {
     database: {
       POSTGRES_CONFIGURED: Boolean(process.env.DATABASE_URL?.trim() || process.env.POSTGRES_URL?.trim()),
     },
+    proxy: {
+      UPSTREAM_API_CONFIGURED: Boolean(process.env.CV_UPSTREAM_API?.trim()),
+      SERVICE_TOKEN_CONFIGURED: Boolean(process.env.CV_SERVICE_TOKEN?.trim()),
+    },
     status: "OK",
     mensaje: "API de debug funcionando correctamente",
   };

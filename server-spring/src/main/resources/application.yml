@@ -1,0 +1,88 @@
+## ============================================================================
+## CompraVerificada API (Spring Boot, deploy en Tomcat de Windows).
+##
+## Configuración 100% autocontenida en este archivo: queda dentro del WAR
+## (`api.war`, en `WEB-INF/classes/application.yml`). NO se leen variables
+## de entorno ni `setenv.sh` / `setenv.bat`.
+##
+## ⚠ Contiene secretos en texto plano (password de DB y API key de OpenAI).
+## Asumido y aceptado por configuración explícita.
+##
+## DB target: localhost:5432 / compra_verificada (user cv_app).
+## Si Postgres está en otro host, cambiá la URL más abajo y rebuildeá el WAR.
+## ============================================================================
+
+spring:
+  application:
+    name: compra-verificada-api
+
+  datasource:
+    # Conexión a la DB del Tomcat de Windows.
+    # Si Postgres NO está en el mismo Windows, cambiá `localhost` por la IP/host del servidor de DB.
+    # Si la DB pide TLS, agregale `?sslmode=require` al final de la URL.
+    url: jdbc:postgresql://localhost:5432/compra_verificada
+    username: cv_app
+    password: "cv2026"
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 10
+      connection-timeout: 25000
+      pool-name: cv-hikari
+
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+      indent-output: false
+    default-property-inclusion: ALWAYS
+
+server:
+  # Cuando el WAR se llama `api.war` y se deja en `webapps/`, Tomcat externo lo
+  # publica directamente bajo `/api/...`. Esta línea aplica solo cuando corrés
+  # con `mvn spring-boot:run` (Tomcat embebido) — Tomcat externo la ignora.
+  servlet:
+    context-path: /api
+  forward-headers-strategy: native
+  error:
+    include-message: always
+
+cv:
+  schema:
+    # Aplica db/schema.sql al arrancar (idempotente). En local conviene `true` para
+    # que la base quede inicializada sola. En el servidor Windows, una vez que la
+    # base esté creada, podés ponerlo en `false`.
+    apply-on-startup: true
+
+  service:
+    # Token Bearer compartido (Node ↔ Spring, o front ↔ Spring).
+    # Vacío = auth desactivada (modo dev / prueba local). Para el servidor Windows,
+    # poné un secreto largo y exigí `Authorization: Bearer <token>` en cada request.
+    auth-token: ""
+
+  cluster:
+    # Secreto del POST que dispara el batch de clustering (OpenAI + escritura DB).
+    # Vacío = sin chequeo en local. En el servidor Windows poné algo no triviial.
+    batch-secret: ""
+
+  openai:
+    # API key de OpenAI. Reemplazá el placeholder por tu key real ANTES de buildear el WAR
+    # (mismo valor que `OPENAI_API_KEY` en `server/.env`). Si lo dejás en placeholder,
+    # los GET siguen funcionando; solo el POST /api/analytics/operational/product-clustering-run falla.
+    api-key: "REEMPLAZAR_CON_OPENAI_API_KEY"
+    project-id: "proj_0FibL5ewgzT1mEpJgrZz4Vll"
+    base-url: "https://api.openai.com/v1"
+    embedding-model: text-embedding-3-small
+    embedding-dimensions: 1536
+
+  cluster-merge:
+    # Defaults del batch (mismos que el server Node). Solo tocá si querés
+    # más / menos agresividad en la fusión post-DBSCAN.
+    skip-centroid: false
+    centroid-min-similarity: 0.92
+    skip-pairwise: false
+    skip-title-anchor: false
+    title-anchor-min-len: 10
+
+logging:
+  level:
+    root: INFO
+    com.compraverificada: INFO

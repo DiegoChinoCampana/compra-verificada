@@ -1,0 +1,18 @@
+target/
+build/
+.idea/
+.vscode/
+*.iml
+*.iws
+*.ipr
+.classpath
+.project
+.settings/
+.factorypath
+.flattened-pom.xml
+HELP.md
+
+# Sólo el example queda commiteado
+src/main/resources/application-local.yml
+src/main/resources/application-prod.yml
+src/main/resources/application-tomcat.yml

@@ -1,3 +1,16 @@
 **/node_modules/**
 client/node_modules
 server/node_modules
+
+# ─── Backend Spring/Tomcat (NO va a Vercel) ────────────────────────────────
+# Vercel solo sirve el front (client/dist) y las funciones de api/*.ts que
+# usan el server Node. La capa Spring vive en su propio Tomcat (Windows).
+# La excluimos completa para que no infle el deploy ni confunda a Vercel.
+server-spring/
+server-spring/**
+
+# Por las dudas, artefactos típicos de builds Java sueltos en cualquier lado:
+**/target/
+**/*.war
+**/*.jar
+**/*.class

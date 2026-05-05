@@ -7,7 +7,8 @@ export default defineConfig({
   plugins: [react()],
   server: {
     proxy: {
-      '/api': 'http://localhost:3001',
+      // Apuntá a 3001 (Node) o 8080 (Spring/Tomcat). Mismo prefijo /api en ambos.
+      '/api': 'http://localhost:8080',
     },
   },
 })
