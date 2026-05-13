@@ -155,11 +155,30 @@ export function HotSaleRoundupPage() {
               timeStyle: "short",
             })}{" "}
             · ventana <strong>{data.days}</strong> días ·{" "}
-            <strong>{nLinkedVoted}</strong> de {data.voted.length} opciones votadas vinculadas a una ficha.
+            <strong>{nLinkedVoted}</strong> de {data.voted.length} productos del voto ya tienen una{" "}
+            <strong>búsqueda monitoreada</strong> asignada (para precios y resumen). El resto sigue como texto del voto
+            hasta que el equipo las una.
           </p>
 
           <section className="card block" style={{ marginTop: "1.25rem" }}>
             <h2>1) Lo que votaron en Instagram</h2>
+            {nLinkedVoted === 0 ? (
+              <p
+                className="muted small"
+                style={{
+                  marginBottom: "1rem",
+                  padding: "0.75rem 1rem",
+                  background: "var(--card-bg, rgba(0,0,0,0.04))",
+                  borderRadius: "6px",
+                }}
+              >
+                <strong>¿Por qué dice “pendiente de asignar”?</strong> Lo de Instagram es solo el nombre que votó la
+                gente. Para traer <strong>precios relevados</strong> y el botón <strong>Resumen</strong>, alguien del
+                equipo tiene que marcar <strong>qué ficha de Compra Verificada</strong> corresponde a cada producto (el
+                número que figura en <Link to="/articulos">Artículos</Link>). Mientras no haya esa asignación, la tabla
+                muestra el voto pero no hay datos de monitoreo para esa fila.
+              </p>
+            ) : null}
             <p className="muted small">
               Además del primer vs último día con dato, miramos el <strong>rango y la mediana</strong> de los mínimos
               diarios y si hubo <strong>caídas fuertes</strong> entre un día y el siguiente; eso ayuda a detectar
@@ -172,7 +191,7 @@ export function HotSaleRoundupPage() {
                   <tr>
                     <th>Encuesta / historia</th>
                     <th>Opción (Instagram)</th>
-                    <th>Ficha</th>
+                    <th>Búsqueda (ficha)</th>
                     <th>Tendencia y lectura</th>
                     <th>Resumen</th>
                   </tr>
@@ -196,7 +215,9 @@ export function HotSaleRoundupPage() {
                             ) : null}
                           </>
                         ) : (
-                          <span className="muted">Sin vincular</span>
+                          <span className="muted" title="Falta indicar el ID de la ficha en Artículos">
+                            Pendiente de asignar
+                          </span>
                         )}
                       </td>
                       <td>
@@ -248,7 +269,7 @@ export function HotSaleRoundupPage() {
                 <table className="table">
                   <thead>
                     <tr>
-                      <th>Ficha</th>
+                      <th>Búsqueda</th>
                       <th>Tendencia y lectura</th>
                       <th>Mínimos</th>
                       <th>Resumen</th>
