@@ -24,7 +24,7 @@ export default function handler(_req: VercelRequest, res: VercelResponse): void 
       { ruta: "/api/analytics/operational/*", descripcion: "Express — operación" },
       {
         ruta: "/api/report/hot-sale-roundup",
-        descripcion: "Express/Spring — guía Hot Sale (votados + top caídas de precio)",
+        descripcion: "Express — guía Hot Sale (handler dedicado Vercel)",
       },
       {
         ruta: "/api/report/article/:articleId",

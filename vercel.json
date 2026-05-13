@@ -18,7 +18,8 @@
     { "source": "/resultados/:path*", "destination": "/index.html" },
     { "source": "/analisis", "destination": "/index.html" },
     { "source": "/analisis/:path*", "destination": "/index.html" },
-    { "source": "/operacion", "destination": "/index.html" },
+    { "source": "/guia-hot-sale", "destination": "/index.html" },
+    { "source": "/guia-hot-sale/:path*", "destination": "/index.html" },
     { "source": "/operacion/:path*", "destination": "/index.html" },
     {
       "source": "/((?!api/).*)",
@@ -67,6 +68,10 @@
       "includeFiles": "server/dist/**"
     },
     "api/report/article/[articleId].ts": {
+      "maxDuration": 120,
+      "includeFiles": "server/dist/**"
+    },
+    "api/report/hot-sale-roundup.ts": {
       "maxDuration": 120,
       "includeFiles": "server/dist/**"
     },
