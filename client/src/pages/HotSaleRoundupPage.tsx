@@ -1,4 +1,5 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import type { FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { fetchJson } from "../api";
 import type { HotSaleNarrativePayload, HotSaleRoundupPayload } from "../types";
