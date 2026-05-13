@@ -14,8 +14,19 @@ import {
   sqlWhereManualProductTitleAndSeller,
   sqlWhereProductKey,
 } from "../sql/articleSameProductTitle.js";
+import { buildHotSaleRoundup } from "../hotSaleRoundup.js";
 
 export const reportRouter = Router();
+
+/** Guía Hot Sale: votados en Instagram + top fichas con precio a la baja en la ventana. */
+reportRouter.get("/hot-sale-roundup", async (req, res) => {
+  try {
+    const payload = await buildHotSaleRoundup(req.query.days);
+    res.json(payload);
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
 
 function parseId(param: string): number | null {
   const id = Number(param);

@@ -257,3 +257,59 @@ export type ReportPayload = {
   };
   recommendation: Recommendation;
 };
+
+/** GET /api/report/hot-sale-roundup */
+export type HotSaleNarrativeFlags = {
+  possibleInflatedAnchor: boolean;
+  lastBelowWindowMedian: boolean;
+  lastAboveWindowMedian: boolean;
+  sharpDayDrop: boolean;
+};
+
+export type HotSaleNarrativePayload = {
+  bullets: string[];
+  flags: HotSaleNarrativeFlags;
+};
+
+export type HotSaleVotedRoundupRow = {
+  pollLabel: string;
+  instagramLabel: string;
+  articleId: number | null;
+  linked: boolean;
+  article: string | null;
+  brand: string | null;
+  detail: string | null;
+  first_min: number | null;
+  last_min: number | null;
+  trend_pct: number | null;
+  n_points: number | null;
+  w_min: number | null;
+  w_max: number | null;
+  w_median: number | null;
+  max_dod_drop_pct: number | null;
+  narrative: HotSaleNarrativePayload | null;
+};
+
+export type HotSalePriceDropRow = {
+  article_id: number;
+  article: string;
+  brand: string | null;
+  detail: string | null;
+  first_min: number;
+  last_min: number;
+  trend_pct: number;
+  n_points: number;
+  w_min: number;
+  w_max: number;
+  w_median: number;
+  max_dod_drop_pct: number;
+  narrative: HotSaleNarrativePayload;
+};
+
+export type HotSaleRoundupPayload = {
+  generatedAt: string;
+  days: number;
+  disclaimer: string;
+  voted: HotSaleVotedRoundupRow[];
+  topPriceDrops: HotSalePriceDropRow[];
+};

@@ -28,6 +28,9 @@ export function Layout() {
           <NavLink to="/resultados" end className={navCls}>
             Resultados
           </NavLink>
+          <NavLink to="/guia-hot-sale" className={navCls}>
+            Hot Sale
+          </NavLink>
           <NavLink to="/analisis" className={navCls}>
             Análisis
           </NavLink>

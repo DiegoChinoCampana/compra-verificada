@@ -23,6 +23,10 @@ export default function handler(_req: VercelRequest, res: VercelResponse): void 
       { ruta: "/api/analytics/peers/by-article-detail", descripcion: "Express — peers" },
       { ruta: "/api/analytics/operational/*", descripcion: "Express — operación" },
       {
+        ruta: "/api/report/hot-sale-roundup",
+        descripcion: "Express/Spring — guía Hot Sale (votados + top caídas de precio)",
+      },
+      {
         ruta: "/api/report/article/:articleId",
         descripcion: "Express — informe / resumen (handler dedicado Vercel)",
       },
@@ -36,6 +40,7 @@ export default function handler(_req: VercelRequest, res: VercelResponse): void 
       tablero: "/articulos/:id",
       listados: "/articulos/:id/listados",
       informe_ui: "/informe/:id",
+      guia_hot_sale: "/guia-hot-sale",
       nota: "La app no usa /tableros ni /api/tableros en producción; los handlers /api/tableros son solo para probar el enrutado de Vercel.",
     },
     nota: "Las rutas del frontend (SPA) usan rewrites en vercel.json hacia /index.html",
