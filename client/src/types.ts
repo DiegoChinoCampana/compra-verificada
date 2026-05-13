@@ -275,6 +275,9 @@ export type HotSaleVotedRoundupRow = {
   pollLabel: string;
   instagramLabel: string;
   articleId: number | null;
+  resolvedByMatch: boolean;
+  /** Ficha asignada con criterio ampliado (no coincidía el producto exacto del voto). Ausente en APIs viejas. */
+  approximateMatch?: boolean;
   linked: boolean;
   article: string | null;
   brand: string | null;

@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { fetchJson } from "../api";
+import type { FromHotSaleLocationState } from "../hotSaleNavState";
 import type { HotSaleNarrativePayload, HotSaleRoundupPayload } from "../types";
 
 const ALLOWED_DAYS = [10, 30, 60] as const;
@@ -57,10 +58,16 @@ function WindowRangeLine(props: {
 }
 
 export function HotSaleRoundupPage() {
-  const [days, setDays] = useState<10 | 30 | 60>(30);
+  const [searchParams] = useSearchParams();
+  const [days, setDays] = useState<10 | 30 | 60>(() => {
+    const n = Number(searchParams.get("days"));
+    return ALLOWED_DAYS.includes(n as (typeof ALLOWED_DAYS)[number]) ? (n as 10 | 30 | 60) : 30;
+  });
   const [data, setData] = useState<HotSaleRoundupPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+
+  const resumenNavState = useMemo<FromHotSaleLocationState>(() => ({ from: "hot-sale", days }), [days]);
 
   useEffect(() => {
     let cancelled = false;
@@ -87,6 +94,16 @@ export function HotSaleRoundupPage() {
 
   const nLinkedVoted = useMemo(
     () => (data?.voted ?? []).filter((r) => r.articleId != null).length,
+    [data],
+  );
+
+  const nAutoResolved = useMemo(
+    () => (data?.voted ?? []).filter((r) => r.articleId != null && r.resolvedByMatch).length,
+    [data],
+  );
+
+  const nApproximate = useMemo(
+    () => (data?.voted ?? []).filter((r) => r.articleId != null && !!r.approximateMatch).length,
     [data],
   );
 
@@ -156,8 +173,22 @@ export function HotSaleRoundupPage() {
             })}{" "}
             · ventana <strong>{data.days}</strong> días ·{" "}
             <strong>{nLinkedVoted}</strong> de {data.voted.length} productos del voto ya tienen una{" "}
-            <strong>búsqueda monitoreada</strong> asignada (para precios y resumen). El resto sigue como texto del voto
-            hasta que el equipo las una.
+            <strong>búsqueda monitoreada</strong> asignada (para precios y resumen).
+            {nAutoResolved > 0 ? (
+              <>
+                {" "}
+                De esos, <strong>{nAutoResolved}</strong> se detectaron automáticamente por nombre/marca/detalle (misma
+                idea que el filtro de Artículos).
+              </>
+            ) : null}
+            {nApproximate > 0 ? (
+              <>
+                {" "}
+                En <strong>{nApproximate}</strong> caso{nApproximate === 1 ? "" : "s"} no hubo ficha con el criterio
+                completo del voto: mostramos la <strong>coincidencia más cercana</strong> (p. ej. solo marca).
+              </>
+            ) : null}{" "}
+            El resto sigue como texto del voto hasta que el equipo ajuste el criterio o el ID fijo.
           </p>
 
           <section className="card block" style={{ marginTop: "1.25rem" }}>
@@ -173,10 +204,10 @@ export function HotSaleRoundupPage() {
                 }}
               >
                 <strong>¿Por qué dice “pendiente de asignar”?</strong> Lo de Instagram es solo el nombre que votó la
-                gente. Para traer <strong>precios relevados</strong> y el botón <strong>Resumen</strong>, alguien del
-                equipo tiene que marcar <strong>qué ficha de Compra Verificada</strong> corresponde a cada producto (el
-                número que figura en <Link to="/articulos">Artículos</Link>). Mientras no haya esa asignación, la tabla
-                muestra el voto pero no hay datos de monitoreo para esa fila.
+                gente. Si no encontramos una ficha que coincida por los criterios configurados, no hay monitoreo para
+                esa fila. Podés fijar el <strong>ID en la config del servidor</strong> o afinar los fragmentos artículo /
+                marca / detalle (como en <Link to="/articulos">Artículos</Link>) para que la búsqueda automática
+                encuentre la ficha correcta.
               </p>
             ) : null}
             <p className="muted small">
@@ -205,6 +236,28 @@ export function HotSaleRoundupPage() {
                         {r.articleId != null ? (
                           <>
                             <strong>#{r.articleId}</strong>
+                            {r.resolvedByMatch ? (
+                              <span className="muted small" title="ID hallado por coincidencia (ILIKE) con artículo/marca/detalle">
+                                {" "}
+                                (auto)
+                              </span>
+                            ) : null}
+                            {r.approximateMatch ? (
+                              <div
+                                className="small"
+                                style={{
+                                  marginTop: "0.35rem",
+                                  padding: "0.35rem 0.5rem",
+                                  background: "var(--card-bg, rgba(255, 180, 0, 0.12))",
+                                  borderRadius: "4px",
+                                  maxWidth: "20rem",
+                                }}
+                              >
+                                <strong>No encontramos el producto exacto</strong> que votó la audiencia con el criterio
+                                completo: esta ficha es una <strong>coincidencia aproximada</strong> (criterio ampliado,
+                                p. ej. solo marca o categoría).
+                              </div>
+                            ) : null}
                             {r.article ? (
                               <div className="muted small">
                                 {r.article}
@@ -244,7 +297,9 @@ export function HotSaleRoundupPage() {
                       </td>
                       <td>
                         {r.articleId != null ? (
-                          <Link to={`/resumen/${r.articleId}`}>Resumen</Link>
+                          <Link to={`/resumen/${r.articleId}`} state={resumenNavState}>
+                            Resumen
+                          </Link>
                         ) : (
                           <span className="muted">—</span>
                         )}
@@ -301,7 +356,9 @@ export function HotSaleRoundupPage() {
                           <div>{r.n_points} días con dato</div>
                         </td>
                         <td>
-                          <Link to={`/resumen/${r.article_id}`}>Resumen</Link>
+                          <Link to={`/resumen/${r.article_id}`} state={resumenNavState}>
+                            Resumen
+                          </Link>
                         </td>
                       </tr>
                     ))}

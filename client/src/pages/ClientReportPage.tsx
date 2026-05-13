@@ -9,6 +9,7 @@ import {
   softenRecommendationCopy,
 } from "../reportClientCopy";
 import { RESULTS_SCRAPED_LEDE } from "../resultsScrapedLede";
+import { hotSaleListPath, isFromHotSaleState } from "../hotSaleNavState";
 import { isFromResultsState, resultsListPath } from "../resultsNavState";
 import { asHtml2PdfOptions } from "../pdfHtml2PdfOptions";
 import type { ReportPayload } from "../types";
@@ -29,8 +30,13 @@ export function ClientReportPage() {
   const location = useLocation();
   const articleId = Number(id);
   const fromResults = isFromResultsState(location.state);
-  const backTo = fromResults ? resultsListPath(location.state) : "/articulos";
-  const backLabel = fromResults ? "Resultados" : "Artículos";
+  const fromHotSale = isFromHotSaleState(location.state);
+  const backTo = fromResults
+    ? resultsListPath(location.state)
+    : fromHotSale
+      ? hotSaleListPath(location.state)
+      : "/articulos";
+  const backLabel = fromResults ? "Resultados" : fromHotSale ? "Guía Hot Sale" : "Artículos";
   const reportSuffix = useMemo(() => {
     const q = new URLSearchParams();
     const pk = sp.get("productKey")?.trim();
@@ -133,12 +139,20 @@ export function ClientReportPage() {
     <div className="report client-report">
       <div className="no-print report-toolbar">
         <div className="report-toolbar__links">
-          <Link to={backTo} state={fromResults ? location.state : undefined}>
+          <Link
+            to={backTo}
+            state={fromResults || fromHotSale ? location.state : undefined}
+          >
             {backLabel}
           </Link>
           <Link to={`/informe/${articleId}${reportSuffix}`}>Informe detallado (equipo)</Link>
           {fromResults ? (
             <Link to="/articulos">Artículos</Link>
+          ) : fromHotSale ? (
+            <>
+              <Link to="/articulos">Artículos</Link>
+              <Link to="/resultados">Resultados</Link>
+            </>
           ) : (
             <Link to="/resultados">Resultados</Link>
           )}

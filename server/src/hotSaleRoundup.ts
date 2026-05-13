@@ -1,5 +1,5 @@
 import { pool } from "./db.js";
-import { HOT_SALE_VOTED_SLOTS, type HotSaleVotedSlot } from "./config/hotSaleVoted.js";
+import { loadHotSaleVotedSlots, type HotSaleVotedSlot } from "./config/hotSaleVoted.js";
 import { buildHotSaleNarrative, type HotSaleNarrative } from "./hotSaleNarrative.js";
 
 const ALLOWED_DAYS = new Set([10, 30, 60]);
@@ -24,6 +24,12 @@ export type HotSaleVotedPayloadRow = {
   pollLabel: string;
   instagramLabel: string;
   articleId: number | null;
+  /** true si el ID salió de `match` (ILIKE) y no de `articleId` fijo en config. */
+  resolvedByMatch: boolean;
+  /**
+   * true si no hubo ficha con el criterio completo y se usó un nivel más laxo (solo marca, etc.).
+   */
+  approximateMatch: boolean;
   linked: boolean;
   article: string | null;
   brand: string | null;
@@ -204,18 +210,100 @@ function mapTrendRows(rows: Record<string, unknown>[]): Map<number, HotSaleTrend
   return m;
 }
 
+type EnrichedVotedSlot = {
+  slot: HotSaleVotedSlot;
+  effectiveArticleId: number | null;
+  resolvedByMatch: boolean;
+  approximateMatch: boolean;
+};
+
+/** Fragmentos por intento: de más específico a más laxo (ej. solo marca «Adidas»). */
+function hotSaleMatchAttempts(m: NonNullable<HotSaleVotedSlot["match"]>): { article: string; brand: string; detail: string }[] {
+  const article = (m.article ?? "").trim();
+  const brand = (m.brand ?? "").trim();
+  const detail = (m.detail ?? "").trim();
+  const attempts: { article: string; brand: string; detail: string }[] = [];
+  const seen = new Set<string>();
+  const add = (a: string, b: string, d: string) => {
+    if (!a && !b && !d) return;
+    const key = `${a}\x1d${b}\x1d${d}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    attempts.push({ article: a, brand: b, detail: d });
+  };
+  add(article, brand, detail);
+  if (detail) add(article, brand, "");
+  if (article) add("", brand, detail);
+  if (brand) add("", brand, "");
+  if (article) add(article, "", "");
+  if (detail) add("", "", detail);
+  return attempts;
+}
+
+async function resolveArticleIdByMatch(
+  m: NonNullable<HotSaleVotedSlot["match"]>,
+): Promise<{ id: number | null; approximateMatch: boolean }> {
+  const attempts = hotSaleMatchAttempts(m);
+  if (attempts.length === 0) return { id: null, approximateMatch: false };
+  for (let i = 0; i < attempts.length; i++) {
+    const { article, brand, detail } = attempts[i];
+    const { rows } = await pool.query<{ id: string }>(
+      `SELECT id FROM articles
+       WHERE enabled = TRUE
+         AND ($1::text = '' OR article ILIKE '%' || $1 || '%')
+         AND ($2::text = '' OR COALESCE(brand, '') ILIKE '%' || $2 || '%')
+         AND ($3::text = '' OR COALESCE(detail, '') ILIKE '%' || $3 || '%')
+       ORDER BY id DESC
+       LIMIT 1`,
+      [article, brand, detail],
+    );
+    const id = Number(rows[0]?.id);
+    if (Number.isInteger(id)) return { id, approximateMatch: i > 0 };
+  }
+  return { id: null, approximateMatch: false };
+}
+
+async function enrichVotedSlots(slots: HotSaleVotedSlot[]): Promise<EnrichedVotedSlot[]> {
+  const out: EnrichedVotedSlot[] = [];
+  for (const slot of slots) {
+    if (slot.articleId != null && Number.isInteger(slot.articleId) && slot.articleId > 0) {
+      out.push({
+        slot,
+        effectiveArticleId: slot.articleId,
+        resolvedByMatch: false,
+        approximateMatch: false,
+      });
+      continue;
+    }
+    let id: number | null = null;
+    let approximateMatch = false;
+    if (slot.match) {
+      const r = await resolveArticleIdByMatch(slot.match);
+      id = r.id;
+      approximateMatch = Boolean(r.approximateMatch && id != null);
+    }
+    out.push({ slot, effectiveArticleId: id, resolvedByMatch: id != null, approximateMatch });
+  }
+  return out;
+}
+
 function buildVotedRows(
-  slots: HotSaleVotedSlot[],
+  enriched: EnrichedVotedSlot[],
   trendByArticle: Map<number, HotSaleTrendRow>,
   articlesMeta: Map<number, { article: string; brand: string | null; detail: string | null }>,
 ): HotSaleVotedPayloadRow[] {
-  return slots.map((s) => {
-    const aid = s.articleId;
+  return enriched.map((e) => {
+    const aid = e.effectiveArticleId;
+    const resolvedByMatch = e.resolvedByMatch;
+    const approximateMatch = e.approximateMatch;
+
     if (aid == null || !Number.isInteger(aid)) {
       return {
-        pollLabel: s.pollLabel,
-        instagramLabel: s.instagramLabel,
+        pollLabel: e.slot.pollLabel,
+        instagramLabel: e.slot.instagramLabel,
         articleId: null,
+        resolvedByMatch: false,
+        approximateMatch: false,
         linked: false,
         article: null,
         brand: null,
@@ -235,9 +323,11 @@ function buildVotedRows(
     const meta = articlesMeta.get(aid);
     if (!t) {
       return {
-        pollLabel: s.pollLabel,
-        instagramLabel: s.instagramLabel,
+        pollLabel: e.slot.pollLabel,
+        instagramLabel: e.slot.instagramLabel,
         articleId: aid,
+        resolvedByMatch,
+        approximateMatch,
         linked: Boolean(meta),
         article: meta?.article ?? null,
         brand: meta?.brand ?? null,
@@ -254,9 +344,11 @@ function buildVotedRows(
       };
     }
     return {
-      pollLabel: s.pollLabel,
-      instagramLabel: s.instagramLabel,
+      pollLabel: e.slot.pollLabel,
+      instagramLabel: e.slot.instagramLabel,
       articleId: aid,
+      resolvedByMatch,
+      approximateMatch,
       linked: true,
       article: t.article,
       brand: t.brand,
@@ -311,14 +403,22 @@ export async function buildHotSaleRoundup(queryDays: unknown): Promise<HotSaleRo
   const trendRows = rows as Record<string, unknown>[];
   const trendByArticle = mapTrendRows(trendRows);
 
+  const votedSlots = await loadHotSaleVotedSlots();
+  const enriched = await enrichVotedSlots(votedSlots);
+
   const votedIds = new Set(
-    HOT_SALE_VOTED_SLOTS.map((s) => s.articleId).filter((id): id is number => id != null && Number.isInteger(id)),
+    enriched
+      .map((e) => e.effectiveArticleId)
+      .filter((id): id is number => id != null && Number.isInteger(id)),
   );
 
-  const linkedIds = HOT_SALE_VOTED_SLOTS.map((s) => s.articleId).filter((id): id is number => id != null && Number.isInteger(id));
+  const linkedIds = enriched
+    .map((e) => e.effectiveArticleId)
+    .filter((id): id is number => id != null && Number.isInteger(id));
+
   const articlesMeta = await fetchArticlesMeta(linkedIds);
 
-  const voted = buildVotedRows(HOT_SALE_VOTED_SLOTS, trendByArticle, articlesMeta);
+  const voted = buildVotedRows(enriched, trendByArticle, articlesMeta);
   const allTrend = [...trendByArticle.values()];
   const topPriceDrops = pickTopDrops(allTrend, votedIds, 10);
 

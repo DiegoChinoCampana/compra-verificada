@@ -1,5 +1,10 @@
 package com.compraverificada.api.web;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
@@ -16,11 +21,12 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 /**
  * Guía Hot Sale: productos votados en Instagram + top fichas con precio a la baja.
- * Mantener slots alineados con {@code server/src/config/hotSaleVoted.ts}.
+ * Slots: {@code configs.name = hot_sale_voted_slots} o env {@code HOT_SALE_VOTED_JSON} (mismo JSON que Node).
  */
 @RestController
 @RequestMapping("/report")
@@ -123,27 +129,104 @@ public class HotSaleRoundupController {
             INNER JOIN articles a ON a.id = t.article_id AND a.enabled = TRUE
             """;
 
-    private record VotedSlot(String pollLabel, String instagramLabel, Integer articleId) {}
+    private record ArticleMatch(String articleFrag, String brandFrag, String detailFrag) {
+        static ArticleMatch of(String a, String b, String d) {
+            return new ArticleMatch(
+                    a == null ? "" : a,
+                    b == null ? "" : b,
+                    d == null ? "" : d);
+        }
 
-    /** Copiado de server/src/config/hotSaleVoted.ts — sincronizar al editar. */
-    private static final List<VotedSlot> HOT_SALE_VOTED_SLOTS = List.of(
-            new VotedSlot("Historia 1 — ¿Qué producto analizamos?", "Auriculares JBL tune 510BT", null),
-            new VotedSlot("Historia 1 — ¿Qué producto analizamos?", "Adidas deportivas Duramo", null),
-            new VotedSlot("Historia 1 — ¿Qué producto analizamos?", "Colchón Calm 200x200", null),
-            new VotedSlot("Historia 1 — ¿Qué producto analizamos?", "Maybelline máscara Colossal Bubble", null),
-            new VotedSlot("Historia 2 — ¿Qué producto analizamos?", "TV Samsung crystal UHD", null),
-            new VotedSlot("Historia 2 — ¿Qué producto analizamos?", "MacBook Air M1", null),
-            new VotedSlot("Historia 2 — ¿Qué producto analizamos?", "AirPods 2", null),
-            new VotedSlot("Historia 2 — ¿Qué producto analizamos?", "JBL flip 6", null),
-            new VotedSlot("Historia 3 — ¿Qué producto analizamos?", "Nike dunk low retro", null),
-            new VotedSlot("Historia 3 — ¿Qué producto analizamos?", "Airfryer Philips", null),
-            new VotedSlot("Historia 3 — ¿Qué producto analizamos?", "Smart TV 4k LG", null),
-            new VotedSlot("Historia 3 — ¿Qué producto analizamos?", "Microondas Samsung", null));
+        boolean isUsable() {
+            return !articleFrag.isEmpty() || !brandFrag.isEmpty() || !detailFrag.isEmpty();
+        }
+    }
+
+    private record VotedSlot(String pollLabel, String instagramLabel, Integer articleId, ArticleMatch match) {}
+
+    private record EnrichedVote(
+            VotedSlot slot,
+            Integer effectiveArticleId,
+            boolean resolvedByMatch,
+            boolean approximateMatch) {}
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private static class VotedSlotJson {
+        public String pollLabel;
+        public String instagramLabel;
+        public Integer articleId;
+        public MatchJson match;
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private static class MatchJson {
+        public String article;
+        public String brand;
+        public String detail;
+    }
+
+    private static final Logger log = LoggerFactory.getLogger(HotSaleRoundupController.class);
+    private static final String HOT_SALE_CONFIG_NAME = "hot_sale_voted_slots";
 
     private final NamedParameterJdbcTemplate jdbc;
+    private final ObjectMapper objectMapper;
 
-    public HotSaleRoundupController(NamedParameterJdbcTemplate jdbc) {
+    public HotSaleRoundupController(NamedParameterJdbcTemplate jdbc, ObjectMapper objectMapper) {
         this.jdbc = jdbc;
+        this.objectMapper = objectMapper;
+    }
+
+    private List<VotedSlot> parseVotedSlotsJson(String json) throws java.io.IOException {
+        List<VotedSlotJson> parsed = objectMapper.readValue(json, new TypeReference<>() {});
+        List<VotedSlot> out = new ArrayList<>();
+        for (VotedSlotJson j : parsed) {
+            String poll = j.pollLabel != null ? j.pollLabel : "";
+            String insta = j.instagramLabel != null ? j.instagramLabel : "";
+            if (poll.isBlank() && insta.isBlank()) {
+                continue;
+            }
+            Integer articleId = j.articleId;
+            if (articleId != null && articleId <= 0) {
+                articleId = null;
+            }
+            ArticleMatch match = null;
+            if (j.match != null) {
+                match = ArticleMatch.of(
+                        j.match.article != null ? j.match.article : "",
+                        j.match.brand != null ? j.match.brand : "",
+                        j.match.detail != null ? j.match.detail : "");
+                if (!match.isUsable()) {
+                    match = null;
+                }
+            }
+            out.add(new VotedSlot(poll, insta, articleId, match));
+        }
+        return out;
+    }
+
+    private List<VotedSlot> loadVotedSlots() {
+        String env = System.getenv("HOT_SALE_VOTED_JSON");
+        if (env != null && !env.isBlank()) {
+            try {
+                return parseVotedSlotsJson(env.trim());
+            } catch (Exception e) {
+                log.warn("[hotSale] HOT_SALE_VOTED_JSON inválido: {}", e.getMessage());
+                return List.of();
+            }
+        }
+        try {
+            List<String> vals = jdbc.query(
+                    "SELECT value FROM configs WHERE name = :name ORDER BY id DESC LIMIT 1",
+                    new MapSqlParameterSource("name", HOT_SALE_CONFIG_NAME),
+                    (rs, rowNum) -> rs.getString("value"));
+            if (vals.isEmpty() || vals.get(0) == null || vals.get(0).isBlank()) {
+                return List.of();
+            }
+            return parseVotedSlotsJson(vals.get(0).trim());
+        } catch (Exception e) {
+            log.warn("[hotSale] No se pudieron cargar slots desde configs ({}): {}", HOT_SALE_CONFIG_NAME, e.getMessage());
+            return List.of();
+        }
     }
 
     private static int parseDays(Integer raw) {
@@ -152,6 +235,95 @@ public class HotSaleRoundupController {
             return d;
         }
         return 30;
+    }
+
+    /** Más específico → más laxo (p. ej. solo marca). */
+    private List<ArticleMatch> articleMatchAttempts(ArticleMatch m) {
+        String a = m.articleFrag();
+        String b = m.brandFrag();
+        String d = m.detailFrag();
+        List<ArticleMatch> attempts = new ArrayList<>();
+        Set<String> seen = new LinkedHashSet<>();
+        Consumer<ArticleMatch> add = (match) -> {
+            if (!match.isUsable()) {
+                return;
+            }
+            String key = match.articleFrag() + '\u001d' + match.brandFrag() + '\u001d' + match.detailFrag();
+            if (seen.add(key)) {
+                attempts.add(match);
+            }
+        };
+        add.accept(m);
+        if (!d.isEmpty()) {
+            add.accept(ArticleMatch.of(a, b, ""));
+        }
+        if (!a.isEmpty()) {
+            add.accept(ArticleMatch.of("", b, d));
+        }
+        if (!b.isEmpty()) {
+            add.accept(ArticleMatch.of("", b, ""));
+        }
+        if (!a.isEmpty()) {
+            add.accept(ArticleMatch.of(a, "", ""));
+        }
+        if (!d.isEmpty()) {
+            add.accept(ArticleMatch.of("", "", d));
+        }
+        return attempts;
+    }
+
+    private record MatchOutcome(Integer articleId, boolean approximateMatch) {}
+
+    private MatchOutcome resolveArticleMatch(ArticleMatch m) {
+        if (m == null || !m.isUsable()) {
+            return new MatchOutcome(null, false);
+        }
+        String sql = """
+                SELECT id FROM articles
+                WHERE enabled = TRUE
+                  AND (CAST(:article AS text) = '' OR article ILIKE '%' || CAST(:article AS text) || '%')
+                  AND (CAST(:brand AS text) = '' OR COALESCE(brand, '') ILIKE '%' || CAST(:brand AS text) || '%')
+                  AND (CAST(:detail AS text) = '' OR COALESCE(detail, '') ILIKE '%' || CAST(:detail AS text) || '%')
+                ORDER BY id DESC
+                LIMIT 1
+                """;
+        List<ArticleMatch> attempts = articleMatchAttempts(m);
+        for (int i = 0; i < attempts.size(); i++) {
+            ArticleMatch attempt = attempts.get(i);
+            MapSqlParameterSource p = new MapSqlParameterSource()
+                    .addValue("article", attempt.articleFrag())
+                    .addValue("brand", attempt.brandFrag())
+                    .addValue("detail", attempt.detailFrag());
+            List<Map<String, Object>> rows = jdbc.queryForList(sql, p);
+            if (!rows.isEmpty()) {
+                Object idObj = rows.get(0).get("id");
+                if (idObj instanceof Number n) {
+                    return new MatchOutcome(n.intValue(), i > 0);
+                }
+            }
+        }
+        return new MatchOutcome(null, false);
+    }
+
+    private List<EnrichedVote> enrichVotes(List<VotedSlot> slots) {
+        List<EnrichedVote> out = new ArrayList<>();
+        for (VotedSlot s : slots) {
+            if (s.articleId() != null && s.articleId() > 0) {
+                out.add(new EnrichedVote(s, s.articleId(), false, false));
+                continue;
+            }
+            ArticleMatch mat = s.match();
+            if (mat != null && mat.isUsable()) {
+                MatchOutcome mo = resolveArticleMatch(mat);
+                Integer rid = mo.articleId();
+                boolean resolved = rid != null;
+                boolean approx = resolved && mo.approximateMatch();
+                out.add(new EnrichedVote(s, rid, resolved, approx));
+            } else {
+                out.add(new EnrichedVote(s, null, false, false));
+            }
+        }
+        return out;
     }
 
     @GetMapping("/hot-sale-roundup")
@@ -167,13 +339,16 @@ public class HotSaleRoundupController {
             trendByArticle.put(n.intValue(), row);
         }
 
-        Set<Integer> votedIds = HOT_SALE_VOTED_SLOTS.stream()
-                .map(VotedSlot::articleId)
+        List<VotedSlot> slots = loadVotedSlots();
+        List<EnrichedVote> enriched = enrichVotes(slots);
+
+        Set<Integer> votedIds = enriched.stream()
+                .map(EnrichedVote::effectiveArticleId)
                 .filter(id -> id != null && id > 0)
                 .collect(Collectors.toCollection(LinkedHashSet::new));
 
-        List<Integer> linkedIds = HOT_SALE_VOTED_SLOTS.stream()
-                .map(VotedSlot::articleId)
+        List<Integer> linkedIds = enriched.stream()
+                .map(EnrichedVote::effectiveArticleId)
                 .filter(id -> id != null && id > 0)
                 .distinct()
                 .toList();
@@ -181,8 +356,8 @@ public class HotSaleRoundupController {
         Map<Integer, Map<String, Object>> articlesMeta = fetchArticlesMeta(linkedIds);
 
         List<Map<String, Object>> voted = new ArrayList<>();
-        for (VotedSlot slot : HOT_SALE_VOTED_SLOTS) {
-            voted.add(votedRow(slot, trendByArticle, articlesMeta));
+        for (EnrichedVote ev : enriched) {
+            voted.add(votedRow(ev, trendByArticle, articlesMeta));
         }
 
         List<Map<String, Object>> topDrops = trendRows.stream()
@@ -252,14 +427,19 @@ public class HotSaleRoundupController {
     }
 
     private Map<String, Object> votedRow(
-            VotedSlot slot,
+            EnrichedVote ev,
             Map<Integer, Map<String, Object>> trendByArticle,
             Map<Integer, Map<String, Object>> articlesMeta) {
+        VotedSlot slot = ev.slot();
+        Integer aid = ev.effectiveArticleId();
+        boolean resolvedByMatch = ev.resolvedByMatch();
+
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("pollLabel", slot.pollLabel());
         m.put("instagramLabel", slot.instagramLabel());
-        Integer aid = slot.articleId();
         m.put("articleId", aid);
+        m.put("resolvedByMatch", resolvedByMatch);
+        m.put("approximateMatch", aid != null && ev.approximateMatch());
         if (aid == null) {
             m.put("linked", false);
             m.put("article", null);
