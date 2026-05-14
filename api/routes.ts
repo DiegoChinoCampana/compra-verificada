@@ -32,7 +32,7 @@ export default function handler(_req: VercelRequest, res: VercelResponse): void 
       },
       {
         ruta: "/api/meta/whatsapp/webhook",
-        descripcion: "Express — Meta WhatsApp Cloud API (GET verificación, POST mensajes)",
+        descripcion: "Spring (Tomcat) — WhatsApp Cloud API; no corre en Vercel",
       },
       { ruta: "/api/analysis/*", descripcion: "Express — análisis" },
       {

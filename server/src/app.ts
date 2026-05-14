@@ -7,24 +7,10 @@ import { analyticsRouter } from "./routes/analytics.js";
 import { reportRouter } from "./routes/report.js";
 import { analysisRouter } from "./routes/analysis.js";
 import { resultsRouter } from "./routes/results.js";
-import { metaWhatsappWebhookRouter } from "./routes/metaWhatsapp.js";
 
 export const app = express();
 
 app.use(cors());
-
-/** Meta WhatsApp: guardar cuerpo crudo para `X-Hub-Signature-256` (debe ir antes del `express.json()` global). */
-app.use(
-  "/api/meta/whatsapp/webhook",
-  express.json({
-    limit: "2mb",
-    verify: (req, _res, buf) => {
-      (req as express.Request & { rawBody?: Buffer }).rawBody = buf;
-    },
-  }),
-);
-app.use("/api/meta/whatsapp/webhook", metaWhatsappWebhookRouter);
-
 app.use(express.json());
 
 /**

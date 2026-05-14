@@ -52,6 +52,11 @@ public class ServiceTokenFilter {
                 chain.doFilter(req, res);
                 return;
             }
+            // Webhook Meta / WhatsApp (no envía Bearer).
+            if (path != null && path.contains("meta/whatsapp/webhook")) {
+                chain.doFilter(req, res);
+                return;
+            }
             // CORS preflight no trae Authorization.
             if ("OPTIONS".equalsIgnoreCase(req.getMethod())) {
                 chain.doFilter(req, res);

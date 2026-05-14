@@ -82,6 +82,16 @@ cv:
     skip-title-anchor: false
     title-anchor-min-len: 10
 
+  # WhatsApp Cloud API — webhook en este Tomcat (la base solo se toca desde acá).
+  # URL efectiva: /api/meta/whatsapp/webhook (GET challenge + POST).
+  whatsapp:
+    verify-token: ""
+    app-secret: ""
+    cloud-token: ""
+    phone-number-id: ""
+    public-app-base: "https://compra-verificada.vercel.app"
+    graph-api-version: "v21.0"
+
 logging:
   level:
     root: INFO
