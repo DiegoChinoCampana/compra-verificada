@@ -46,6 +46,12 @@ export function buildProxyMiddleware(): RequestHandler {
       return;
     }
 
+    /** WhatsApp / Meta webhook y futuras rutas `/api/meta/*` viven siempre en Node. */
+    if ((req.url ?? "").startsWith("/api/meta")) {
+      next();
+      return;
+    }
+
     const target = upstreamBaseUrl() + (req.url ?? "/");
 
     /** Headers que mandamos al Tomcat. */

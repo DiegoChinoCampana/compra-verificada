@@ -81,6 +81,10 @@
     "api/debug.ts": {
       "maxDuration": 30
     },
+    "api/meta/whatsapp/webhook.ts": {
+      "maxDuration": 120,
+      "includeFiles": "server/dist/**"
+    },
     "api/routes.ts": {
       "maxDuration": 30
     },

@@ -30,6 +30,10 @@ export default function handler(_req: VercelRequest, res: VercelResponse): void 
         ruta: "/api/report/article/:articleId",
         descripcion: "Express — informe / resumen (handler dedicado Vercel)",
       },
+      {
+        ruta: "/api/meta/whatsapp/webhook",
+        descripcion: "Express — Meta WhatsApp Cloud API (GET verificación, POST mensajes)",
+      },
       { ruta: "/api/analysis/*", descripcion: "Express — análisis" },
       {
         ruta: "/api/[...slug]",

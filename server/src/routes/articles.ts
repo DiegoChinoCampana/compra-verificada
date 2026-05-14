@@ -1,4 +1,6 @@
 import { Router } from "express";
+import { insertArticleTriple } from "../articles/articleMutations.js";
+import { isAuthorizedServiceRequest } from "../auth/serviceToken.js";
 import { pool } from "../db.js";
 import { parseProductScopeQuery, productScopeMode } from "../productScopeQuery.js";
 import {
@@ -7,6 +9,31 @@ import {
 } from "../sql/articleSameProductTitle.js";
 
 export const articlesRouter = Router();
+
+/**
+ * Alta de artículo (scraping ML). Requiere `Authorization: Bearer <CV_SERVICE_TOKEN>`.
+ * El bot de WhatsApp usa `insertArticleTriple` directo; esta ruta sirve para integraciones externas.
+ */
+articlesRouter.post("/", async (req, res) => {
+  if (!isAuthorizedServiceRequest(req)) {
+    res.status(401).json({ error: "unauthorized" });
+    return;
+  }
+  const article = typeof req.body?.article === "string" ? req.body.article.trim() : "";
+  const brand = typeof req.body?.brand === "string" ? req.body.brand.trim() : "";
+  const detail = typeof req.body?.detail === "string" ? req.body.detail.trim() : "";
+  if (!article) {
+    res.status(400).json({ error: "article_required" });
+    return;
+  }
+  try {
+    const result = await insertArticleTriple(pool, { article, brand, detail });
+    res.status(result.existed ? 200 : 201).json(result);
+  } catch (e) {
+    console.error("[articles] POST", e);
+    res.status(500).json({ error: "insert_failed" });
+  }
+});
 
 articlesRouter.get("/", async (req, res) => {
   const article = typeof req.query.article === "string" ? req.query.article.trim() : "";
