@@ -34,9 +34,9 @@ function trendSellerCaption(seller: string | null | undefined): string | null {
   if (seller == null || !String(seller).trim()) return null;
   const s = String(seller).trim();
   if (s.toLowerCase() === "(sin tienda)") {
-    return "Para la tendencia usamos solo publicaciones del primer día sin nombre de vendedor en el scrape (mismo producto). Otras tiendas existen, pero no las mezclamos acá para no inventar subidas o bajas falsas.";
+    return "Para la ancla usamos solo publicaciones del primer día sin nombre de tienda en el scrape (mismo producto). Si hay un mejor precio con otra tienda, figura en «Todas las tiendas» debajo.";
   }
-  return `Tendencia solo para la tienda «${s}» (era la del listado más barato el primer día relevado). Hay otras tiendas en Mercado Libre; si mezcláramos todas en un solo número, a veces parece que subió o bajó cuando en realidad cambió cuál oferta salía más barata.`;
+  return `Tendencia principal solo para «${s}» (listado más barato el primer día). Si otra tienda bajó más el mismo producto, eso se ve en «Todas las tiendas» debajo.`;
 }
 
 function NarrativeBlock({ narrative }: { narrative: HotSaleNarrativePayload | null | undefined }) {
@@ -101,8 +101,8 @@ function MarketAllStoresBlock(props: {
         maxWidth: "22rem",
       }}
     >
-      <strong>Todas las tiendas</strong> (cada día, el precio más bajo entre <em>cualquier</em> vendedor del mismo
-      producto): {fmtPct(trend_pct)} · {fmtMoney(first_min)} → {fmtMoney(last_min)}
+      <strong>Todas las tiendas</strong> — precio más bajo entre <em>cualquier</em> vendedor cada día (mismo producto): si
+      otra tienda ganó el mínimo, cuenta acá. {fmtPct(trend_pct)} · {fmtMoney(first_min)} → {fmtMoney(last_min)}
       {w_min != null && Number.isFinite(w_min) ? (
         <>
           {" "}
@@ -189,6 +189,15 @@ export function HotSaleRoundupPage() {
               Primero figuran las opciones que eligió la audiencia en Instagram; abajo, hasta{" "}
               <strong>10 fichas más</strong> monitoreadas donde el precio mínimo relevante{" "}
               <strong>bajó</strong> en la ventana (excluimos las ya listadas arriba).
+            </p>
+            <p className="muted small" style={{ maxWidth: "50rem", marginTop: "0.65rem" }}>
+              Por ficha usamos el <strong>mismo producto</strong> que en el tablero (clúster) y una{" "}
+              <strong>tienda ancla</strong>: la del listado más barato el <em>primer</em> día con dato. El{" "}
+              <strong>porcentaje principal</strong> y la tabla de mínimos de <strong>esa misma tienda</strong> no mezclan
+              otras tiendas que ya existían a otro precio (evita confundir “cambió el vendedor” con “bajó el precio”).
+              Cuando <strong>otra tienda</strong> publica más barato, <strong>sí lo mostramos</strong> en la segunda
+              lectura de cada fila (<strong>Todas las tiendas</strong>): ahí el mínimo del día es entre{" "}
+              <em>cualquier</em> vendedor del mismo producto y la tendencia refleja ese mejor precio global.
             </p>
           </div>
         </div>
