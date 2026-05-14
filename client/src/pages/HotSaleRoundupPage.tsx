@@ -21,20 +21,22 @@ function fmtPct(n: number | null | undefined): string {
 
 function trendPhrase(pct: number | null): string | null {
   if (pct == null || !Number.isFinite(pct)) return null;
-  if (pct < -0.005)
-    return "En la ventana, el precio mínimo de la tienda de referencia bajó respecto al inicio.";
-  if (pct > 0.005)
-    return "En la ventana, el precio mínimo de la tienda de referencia subió respecto al inicio.";
-  return "Precio mínimo de la tienda de referencia relativamente estable en la ventana.";
+  if (pct < -0.005) {
+    return "En la ventana, en esa misma tienda (la del listado más barato el primer día), el precio bajó respecto al inicio.";
+  }
+  if (pct > 0.005) {
+    return "En la ventana, en esa misma tienda (la del listado más barato el primer día), el precio subió respecto al inicio.";
+  }
+  return "En esa misma tienda, el precio se mantuvo bastante estable en el período.";
 }
 
 function trendSellerCaption(seller: string | null | undefined): string | null {
   if (seller == null || !String(seller).trim()) return null;
   const s = String(seller).trim();
   if (s.toLowerCase() === "(sin tienda)") {
-    return "Referencia: listados sin nombre de tienda en el primer día (mismo producto en el clúster).";
+    return "Para la tendencia usamos solo publicaciones del primer día sin nombre de vendedor en el scrape (mismo producto). Otras tiendas existen, pero no las mezclamos acá para no inventar subidas o bajas falsas.";
   }
-  return `Referencia: tienda «${s}» (listado más barato al primer día relevado de ese producto).`;
+  return `Tendencia solo para la tienda «${s}» (era la del listado más barato el primer día relevado). Hay otras tiendas en Mercado Libre; si mezcláramos todas en un solo número, a veces parece que subió o bajó cuando en realidad cambió cuál oferta salía más barata.`;
 }
 
 function NarrativeBlock({ narrative }: { narrative: HotSaleNarrativePayload | null | undefined }) {
@@ -60,9 +62,52 @@ function WindowRangeLine(props: {
   if (w_min == null || !Number.isFinite(w_min)) return null;
   return (
     <div className="muted small" style={{ marginTop: "0.35rem" }}>
-      En la ventana, mínimos diarios: bajo {fmtMoney(w_min)} · mediana {fmtMoney(w_median)} · alto {fmtMoney(w_max)}
+      En la ventana, mínimos diarios de <strong>esa misma tienda</strong>: bajo {fmtMoney(w_min)} · mediana{" "}
+      {fmtMoney(w_median)} · alto {fmtMoney(w_max)}
       {max_dod_drop_pct != null && max_dod_drop_pct > 0.02 ? (
         <span> · mayor caída día a día ~{fmtPct(max_dod_drop_pct)}</span>
+      ) : null}
+    </div>
+  );
+}
+
+/** Mejor precio por día entre cualquier vendedor (mismo producto / clúster): puede haber bajado otra tienda. */
+function MarketAllStoresBlock(props: {
+  trend_pct: number | null | undefined;
+  first_min: number | null | undefined;
+  last_min: number | null | undefined;
+  w_min: number | null | undefined;
+  w_median: number | null | undefined;
+  w_max: number | null | undefined;
+}) {
+  const { trend_pct, first_min, last_min, w_min, w_median, w_max } = props;
+  if (
+    first_min == null ||
+    last_min == null ||
+    !Number.isFinite(first_min) ||
+    !Number.isFinite(last_min) ||
+    trend_pct == null ||
+    !Number.isFinite(trend_pct)
+  ) {
+    return null;
+  }
+  return (
+    <div
+      className="muted small"
+      style={{
+        marginTop: "0.45rem",
+        paddingTop: "0.4rem",
+        borderTop: "1px solid var(--border, rgba(0, 0, 0, 0.1))",
+        maxWidth: "22rem",
+      }}
+    >
+      <strong>Todas las tiendas</strong> (cada día, el precio más bajo entre <em>cualquier</em> vendedor del mismo
+      producto): {fmtPct(trend_pct)} · {fmtMoney(first_min)} → {fmtMoney(last_min)}
+      {w_min != null && Number.isFinite(w_min) ? (
+        <>
+          {" "}
+          · rango diario en el período: bajo {fmtMoney(w_min)} · mediana {fmtMoney(w_median)} · alto {fmtMoney(w_max)}
+        </>
       ) : null}
     </div>
   );
@@ -165,10 +210,9 @@ export function HotSaleRoundupPage() {
           </select>
         </label>
         <span className="muted small" style={{ marginLeft: "1rem" }}>
-          Por ficha se elige el <strong>mismo producto</strong> que en el tablero (clúster) y una{" "}
-          <strong>tienda ancla</strong>: la del listado más barato al <em>primer</em> día con dato; los mínimos y
-          la tendencia comparan solo publicaciones de esa tienda y ese producto (no mezclamos otras tiendas que
-          ya existían al otro precio).
+          Mostramos <strong>dos lecturas</strong>: la tienda del listado más barato al <em>primer</em> día (tendencia
+          honesta, sin mezclar vendedores) y, aparte, el <strong>mejor precio entre todas las tiendas</strong> del mismo
+          producto por día, por si otra tienda terminó más barata.
         </span>
       </form>
 
@@ -224,10 +268,8 @@ export function HotSaleRoundupPage() {
               </p>
             ) : null}
             <p className="muted small">
-              Además del primer vs último día con dato, miramos el <strong>rango y la mediana</strong> de los mínimos
-              diarios <strong>de la tienda ancla</strong> y si hubo <strong>caídas fuertes</strong> entre un día y el
-              siguiente; eso ayuda a detectar patrones tipo precios más altos antes de una baja (posible “inflado”) y
-              no guiarse solo por el último número.
+              La fila principal es la <strong>tienda del primer día</strong>. Debajo, cuando hay datos, aparece la lectura
+              entre <strong>todas las tiendas</strong> del mismo producto (mejor precio del día sin importar vendedor).
             </p>
             <div className="table-wrap">
               <table className="table">
@@ -304,6 +346,14 @@ export function HotSaleRoundupPage() {
                               w_max={r.w_max}
                               max_dod_drop_pct={r.max_dod_drop_pct}
                             />
+                            <MarketAllStoresBlock
+                              trend_pct={r.market_trend_pct}
+                              first_min={r.market_first_min}
+                              last_min={r.market_last_min}
+                              w_min={r.market_w_min}
+                              w_median={r.market_w_median}
+                              w_max={r.market_w_max}
+                            />
                             <NarrativeBlock narrative={r.narrative} />
                           </>
                         ) : r.articleId != null ? (
@@ -314,7 +364,7 @@ export function HotSaleRoundupPage() {
                       </td>
                       <td>
                         {r.articleId != null ? (
-                          <Link to={`/resumen/${r.articleId}`} state={resumenNavState}>
+                          <Link to={`/resumen/${r.articleId}?hotSaleDays=${days}`} state={resumenNavState}>
                             Resumen
                           </Link>
                         ) : (
@@ -331,8 +381,8 @@ export function HotSaleRoundupPage() {
           <section className="card block" style={{ marginTop: "1.5rem" }}>
             <h2>2) Otras fichas con precio a la baja (hasta 10)</h2>
             <p className="muted small">
-              Orden: mayor caída relativa primero. Solo fichas habilitadas con al menos dos relevamientos en la
-              ventana; excluidas las que ya están en la lista votada con ID configurado.
+              Orden según la <strong>caída en la tienda del primer día</strong> (como arriba). En cada fila también ves
+              la lectura entre <strong>todas las tiendas</strong> del mismo producto.
             </p>
             {data.topPriceDrops.length === 0 ? (
               <p className="muted">No hubo caídas en la ventana para otras fichas, o aún no hay datos suficientes.</p>
@@ -370,6 +420,14 @@ export function HotSaleRoundupPage() {
                             w_max={r.w_max}
                             max_dod_drop_pct={r.max_dod_drop_pct}
                           />
+                          <MarketAllStoresBlock
+                            trend_pct={r.market_trend_pct}
+                            first_min={r.market_first_min}
+                            last_min={r.market_last_min}
+                            w_min={r.market_w_min}
+                            w_median={r.market_w_median}
+                            w_max={r.market_w_max}
+                          />
                           <NarrativeBlock narrative={r.narrative} />
                         </td>
                         <td className="muted small">
@@ -377,7 +435,7 @@ export function HotSaleRoundupPage() {
                           <div>{r.n_points} días con dato</div>
                         </td>
                         <td>
-                          <Link to={`/resumen/${r.article_id}`} state={resumenNavState}>
+                          <Link to={`/resumen/${r.article_id}?hotSaleDays=${days}`} state={resumenNavState}>
                             Resumen
                           </Link>
                         </td>

@@ -22,6 +22,10 @@ type Metrics = {
   w_median: number;
   max_dod_drop_pct: number;
   n_points: number;
+  /** Mejor precio entre cualquier tienda (mismo clúster): primer vs último día, tendencia mercado. */
+  market_first_min?: number | null;
+  market_last_min?: number | null;
+  market_trend_pct?: number | null;
 };
 
 export function buildHotSaleNarrative(m: Metrics): HotSaleNarrative {
@@ -72,6 +76,38 @@ export function buildHotSaleNarrative(m: Metrics): HotSaleNarrative {
     bullets.push(
       `Entre dos días consecutivos con dato hubo una caída grande (hasta ~${p} % entre un día y el siguiente): puede ser promo, cambio de publicaciones o ruido; conviene mirar el listado.`,
     );
+  }
+
+  const mf = m.market_first_min;
+  const ml = m.market_last_min;
+  const mt = m.market_trend_pct;
+  if (
+    ml != null &&
+    Number.isFinite(ml) &&
+    mf != null &&
+    Number.isFinite(mf) &&
+    mf > 0 &&
+    m.last_min > 0
+  ) {
+    if (ml < m.last_min * (1 - PCT_BELOW_MEDIAN)) {
+      const fmt = (n: number) =>
+        n.toLocaleString("es-AR", { maximumFractionDigits: 0, useGrouping: true });
+      bullets.push(
+        `Entre todas las tiendas del mismo producto, el mejor precio al último relevamiento (${fmt(ml)}) fue más bajo que el de la tienda que seguimos día a día (${fmt(m.last_min)}): puede haber mejores ofertas en otras publicaciones.`,
+      );
+    }
+    if (
+      mt != null &&
+      Number.isFinite(mt) &&
+      m.first_min > 0
+    ) {
+      const anchorTrend = (m.last_min - m.first_min) / m.first_min;
+      if (mt < anchorTrend - 0.03 && mt < -0.02) {
+        bullets.push(
+          "El mínimo entre todas las tiendas cayó más en el período que el de la tienda del primer día: conviene revisar el listado completo, no solo el vendedor que arrancó más barato.",
+        );
+      }
+    }
   }
 
   return { bullets, flags };

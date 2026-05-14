@@ -1,5 +1,6 @@
 package com.compraverificada.api.web;
 
+import com.compraverificada.api.service.HotSaleResumenSnapshotService;
 import com.compraverificada.api.service.HotSaleRoundupService;
 import com.compraverificada.api.service.RecommendationService;
 import com.compraverificada.api.sql.ProductScopeQuery;
@@ -27,14 +28,17 @@ public class ReportController {
     private final NamedParameterJdbcTemplate jdbc;
     private final RecommendationService recommendation;
     private final HotSaleRoundupService hotSaleRoundupService;
+    private final HotSaleResumenSnapshotService hotSaleResumenSnapshotService;
 
     public ReportController(
             NamedParameterJdbcTemplate jdbc,
             RecommendationService recommendation,
-            HotSaleRoundupService hotSaleRoundupService) {
+            HotSaleRoundupService hotSaleRoundupService,
+            HotSaleResumenSnapshotService hotSaleResumenSnapshotService) {
         this.jdbc = jdbc;
         this.recommendation = recommendation;
         this.hotSaleRoundupService = hotSaleRoundupService;
+        this.hotSaleResumenSnapshotService = hotSaleResumenSnapshotService;
     }
 
     private static String wrapWithCte(boolean useCte, String body) {
@@ -56,7 +60,8 @@ public class ReportController {
             @PathVariable("articleId") int articleId,
             @RequestParam(value = "productKey", required = false) String productKey,
             @RequestParam(value = "productTitle", required = false) String productTitle,
-            @RequestParam(value = "seller", required = false) String seller) {
+            @RequestParam(value = "seller", required = false) String seller,
+            @RequestParam(value = "hotSaleDays", required = false) Integer hotSaleDays) {
 
         ProductScopeQuery pq = ProductScopeQuery.parse(productKey, productTitle, seller);
         ProductScopeQuery.Mode mode = pq.mode();
@@ -245,6 +250,10 @@ public class ReportController {
         body.put("analyticsScope", analyticsScope);
         body.put("sections", sections);
         body.put("recommendation", rec);
+        Map<String, Object> hotSaleResumen = hotSaleResumenSnapshotService.fetchOrNull(articleId, hotSaleDays);
+        if (hotSaleResumen != null) {
+            body.put("hotSaleResumen", hotSaleResumen);
+        }
         return ResponseEntity.ok(body);
     }
 

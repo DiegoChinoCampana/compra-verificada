@@ -246,11 +246,24 @@ export type PriceJumpsByNamePayload = {
   rows: PriceJumpRow[];
 };
 
+export type HotSaleResumenPayload = {
+  days: number;
+  lastRunAt: string;
+  lastRunMinAny: number;
+  lastRunCheapestSeller: string | null;
+  anchorSeller: string | null;
+  anchorFirstMin: number;
+  anchorMaxInWindow: number;
+  otherStoreBeatAnchor: boolean;
+};
+
 export type ReportPayload = {
   generatedAt: string;
   article: Article;
   disclaimer: string;
   analyticsScope?: AnalyticsScopePayload;
+  /** Si la URL incluye `hotSaleDays` y hay datos suficientes, el backend lo rellena. */
+  hotSaleResumen?: HotSaleResumenPayload | null;
   sections: {
     priceSeries: PriceSeriesRow[];
     bestOfferPerRun: Record<string, unknown>[];
@@ -296,6 +309,14 @@ export type HotSaleVotedRoundupRow = {
   max_dod_drop_pct: number | null;
   /** Tienda ancla: misma lógica que topPriceDrops (vendedor del listado más barato del primer día en el clúster). */
   trend_seller?: string | null;
+  market_first_min?: number | null;
+  market_last_min?: number | null;
+  market_trend_pct?: number | null;
+  market_n_points?: number | null;
+  market_w_min?: number | null;
+  market_w_max?: number | null;
+  market_w_median?: number | null;
+  market_max_dod_drop_pct?: number | null;
   narrative: HotSaleNarrativePayload | null;
 };
 
@@ -313,6 +334,14 @@ export type HotSalePriceDropRow = {
   w_median: number;
   max_dod_drop_pct: number;
   trend_seller?: string | null;
+  market_first_min?: number | null;
+  market_last_min?: number | null;
+  market_trend_pct?: number | null;
+  market_n_points?: number | null;
+  market_w_min?: number | null;
+  market_w_max?: number | null;
+  market_w_median?: number | null;
+  market_max_dod_drop_pct?: number | null;
   narrative: HotSaleNarrativePayload;
 };
 

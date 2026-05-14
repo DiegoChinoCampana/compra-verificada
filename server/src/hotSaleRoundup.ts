@@ -24,6 +24,14 @@ export type HotSaleTrendRow = {
   w_max: number;
   w_median: number;
   max_dod_drop_pct: number;
+  market_first_min: number;
+  market_last_min: number;
+  market_trend_pct: number;
+  market_n_points: number;
+  market_w_min: number;
+  market_w_max: number;
+  market_w_median: number;
+  market_max_dod_drop_pct: number;
   narrative: HotSaleNarrative;
 };
 
@@ -50,6 +58,14 @@ export type HotSaleVotedPayloadRow = {
   w_median: number | null;
   max_dod_drop_pct: number | null;
   trend_seller: string | null;
+  market_first_min: number | null;
+  market_last_min: number | null;
+  market_trend_pct: number | null;
+  market_n_points: number | null;
+  market_w_min: number | null;
+  market_w_max: number | null;
+  market_w_median: number | null;
+  market_max_dod_drop_pct: number | null;
   narrative: HotSaleNarrative | null;
 };
 
@@ -145,6 +161,16 @@ run_mins AS (
     AND ${sqlNormSeller("r")} = an.seller_key
   GROUP BY d.search_id, d.scrape_run_id, d.executed_at
 ),
+run_mins_market AS (
+  SELECT d.search_id, d.scrape_run_id, d.executed_at, MIN(r.price)::float8 AS min_price
+  FROM runs_one_per_day d
+  INNER JOIN canonical_per_article ck ON ck.search_id = d.search_id
+  INNER JOIN results r ON r.search_id = d.search_id AND r.scrape_run_id = d.scrape_run_id
+  WHERE r.price IS NOT NULL AND r.price > 0
+    AND ${sqlWhereRespectClusterWhenPresent("r")}
+    AND ${sqlProductGroupingKey("r")} = ck.canonical_gk
+  GROUP BY d.search_id, d.scrape_run_id, d.executed_at
+),
 daily AS (
   SELECT search_id,
     date_trunc('day', executed_at)::date AS d,
@@ -196,7 +222,7 @@ ends AS (
   GROUP BY search_id
   HAVING COUNT(*) >= 2
 ),
-trends AS (
+trends_anchor AS (
   SELECT
     e.search_id AS article_id,
     e.first_min,
@@ -210,24 +236,99 @@ trends AS (
   FROM ends e
   INNER JOIN window_stats ws ON ws.search_id = e.search_id
   INNER JOIN dod_stats ds ON ds.search_id = e.search_id
+),
+daily_market AS (
+  SELECT search_id,
+    date_trunc('day', executed_at)::date AS d,
+    MIN(min_price)::float8 AS day_min
+  FROM run_mins_market
+  GROUP BY search_id, date_trunc('day', executed_at)::date
+),
+window_stats_market AS (
+  SELECT
+    search_id,
+    MIN(day_min)::float8 AS w_min,
+    MAX(day_min)::float8 AS w_max,
+    percentile_cont(0.5) WITHIN GROUP (ORDER BY day_min)::float8 AS w_median
+  FROM daily_market
+  GROUP BY search_id
+  HAVING COUNT(*) >= 2
+),
+dod_market AS (
+  SELECT
+    search_id,
+    day_min,
+    LAG(day_min) OVER (PARTITION BY search_id ORDER BY d) AS prev_min
+  FROM daily_market
+),
+dod_stats_market AS (
+  SELECT search_id,
+    COALESCE(MAX(
+      CASE
+        WHEN prev_min IS NOT NULL AND prev_min > 0 AND day_min < prev_min
+        THEN ((prev_min - day_min) / prev_min)::float8
+        ELSE NULL
+      END
+    ), 0)::float8 AS max_dod_drop_pct
+  FROM dod_market
+  GROUP BY search_id
+),
+ordered_market AS (
+  SELECT search_id, min_price, executed_at,
+    ROW_NUMBER() OVER (PARTITION BY search_id ORDER BY executed_at ASC) AS rn_first,
+    ROW_NUMBER() OVER (PARTITION BY search_id ORDER BY executed_at DESC) AS rn_last
+  FROM run_mins_market
+),
+ends_market AS (
+  SELECT search_id,
+    MAX(min_price) FILTER (WHERE rn_first = 1) AS first_min,
+    MAX(min_price) FILTER (WHERE rn_last = 1) AS last_min,
+    COUNT(*)::int AS n_points
+  FROM ordered_market
+  GROUP BY search_id
+  HAVING COUNT(*) >= 2
+),
+trends_market AS (
+  SELECT
+    e.search_id AS article_id,
+    e.first_min,
+    e.last_min,
+    e.n_points,
+    CASE WHEN e.first_min > 0 THEN ((e.last_min - e.first_min) / e.first_min)::float8 END AS trend_pct,
+    ws.w_min,
+    ws.w_max,
+    ws.w_median,
+    ds.max_dod_drop_pct
+  FROM ends_market e
+  INNER JOIN window_stats_market ws ON ws.search_id = e.search_id
+  INNER JOIN dod_stats_market ds ON ds.search_id = e.search_id
 )
 SELECT
-  t.article_id,
+  ta.article_id,
   a.article,
   a.brand,
   a.detail,
   an.seller_key::text AS trend_seller,
-  t.first_min::float8,
-  t.last_min::float8,
-  t.trend_pct::float8,
-  t.n_points,
-  t.w_min::float8,
-  t.w_max::float8,
-  t.w_median::float8,
-  t.max_dod_drop_pct::float8
-FROM trends t
-INNER JOIN articles a ON a.id = t.article_id AND a.enabled = TRUE
-INNER JOIN anchor_seller an ON an.search_id = t.article_id
+  ta.first_min::float8,
+  ta.last_min::float8,
+  ta.trend_pct::float8,
+  ta.n_points,
+  ta.w_min::float8,
+  ta.w_max::float8,
+  ta.w_median::float8,
+  ta.max_dod_drop_pct::float8,
+  tm.first_min::float8 AS market_first_min,
+  tm.last_min::float8 AS market_last_min,
+  tm.trend_pct::float8 AS market_trend_pct,
+  tm.n_points::int AS market_n_points,
+  tm.w_min::float8 AS market_w_min,
+  tm.w_max::float8 AS market_w_max,
+  tm.w_median::float8 AS market_w_median,
+  tm.max_dod_drop_pct::float8 AS market_max_dod_drop_pct
+FROM trends_anchor ta
+INNER JOIN trends_market tm ON tm.article_id = ta.article_id
+INNER JOIN articles a ON a.id = ta.article_id AND a.enabled = TRUE
+INNER JOIN anchor_seller an ON an.search_id = ta.article_id
 `;
 
 function parseDays(raw: unknown): number {
@@ -245,6 +346,14 @@ function rowToTrendPayload(r: Record<string, unknown>): HotSaleTrendRow {
   const w_max = Number(r.w_max);
   const w_median = Number(r.w_median);
   const max_dod_drop_pct = Number(r.max_dod_drop_pct);
+  const market_first_min = Number(r.market_first_min);
+  const market_last_min = Number(r.market_last_min);
+  const market_trend_pct = Number(r.market_trend_pct);
+  const market_n_points = Number(r.market_n_points);
+  const market_w_min = Number(r.market_w_min);
+  const market_w_max = Number(r.market_w_max);
+  const market_w_median = Number(r.market_w_median);
+  const market_max_dod_drop_pct = Number(r.market_max_dod_drop_pct);
   const ts = r.trend_seller;
   const trend_seller =
     ts == null || String(ts).trim() === "" ? null : String(ts);
@@ -255,6 +364,11 @@ function rowToTrendPayload(r: Record<string, unknown>): HotSaleTrendRow {
     w_median,
     max_dod_drop_pct,
     n_points,
+    market_first_min:
+      Number.isFinite(market_first_min) && market_first_min > 0 ? market_first_min : null,
+    market_last_min:
+      Number.isFinite(market_last_min) && market_last_min > 0 ? market_last_min : null,
+    market_trend_pct: Number.isFinite(market_trend_pct) ? market_trend_pct : null,
   });
   return {
     article_id: id,
@@ -270,6 +384,14 @@ function rowToTrendPayload(r: Record<string, unknown>): HotSaleTrendRow {
     w_max,
     w_median,
     max_dod_drop_pct,
+    market_first_min,
+    market_last_min,
+    market_trend_pct,
+    market_n_points,
+    market_w_min,
+    market_w_max,
+    market_w_median,
+    market_max_dod_drop_pct,
     narrative,
   };
 }
@@ -391,6 +513,14 @@ function buildVotedRows(
         w_median: null,
         max_dod_drop_pct: null,
         trend_seller: null,
+        market_first_min: null,
+        market_last_min: null,
+        market_trend_pct: null,
+        market_n_points: null,
+        market_w_min: null,
+        market_w_max: null,
+        market_w_median: null,
+        market_max_dod_drop_pct: null,
         narrative: null,
       };
     }
@@ -416,6 +546,14 @@ function buildVotedRows(
         w_median: null,
         max_dod_drop_pct: null,
         trend_seller: null,
+        market_first_min: null,
+        market_last_min: null,
+        market_trend_pct: null,
+        market_n_points: null,
+        market_w_min: null,
+        market_w_max: null,
+        market_w_median: null,
+        market_max_dod_drop_pct: null,
         narrative: null,
       };
     }
@@ -438,6 +576,14 @@ function buildVotedRows(
       w_median: t.w_median,
       max_dod_drop_pct: t.max_dod_drop_pct,
       trend_seller: t.trend_seller,
+      market_first_min: t.market_first_min,
+      market_last_min: t.market_last_min,
+      market_trend_pct: t.market_trend_pct,
+      market_n_points: t.market_n_points,
+      market_w_min: t.market_w_min,
+      market_w_max: t.market_w_max,
+      market_w_median: t.market_w_median,
+      market_max_dod_drop_pct: t.market_max_dod_drop_pct,
       narrative: t.narrative,
     };
   });

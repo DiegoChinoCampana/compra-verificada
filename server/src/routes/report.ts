@@ -16,6 +16,7 @@ import {
   sqlWhereRespectClusterWhenPresent,
 } from "../sql/articleSameProductTitle.js";
 import { buildHotSaleRoundup } from "../hotSaleRoundup.js";
+import { fetchHotSaleResumenSnapshot } from "../hotSaleResumenSnapshot.js";
 
 export const reportRouter = Router();
 
@@ -32,6 +33,21 @@ reportRouter.get("/hot-sale-roundup", async (req, res) => {
 function parseId(param: string): number | null {
   const id = Number(param);
   return Number.isInteger(id) ? id : null;
+}
+
+const HOT_SALE_DAYS_ALLOWED = new Set([10, 30, 60]);
+
+function firstQueryString(query: Record<string, unknown>, key: string): string | undefined {
+  const v = query[key];
+  if (typeof v === "string") return v;
+  if (Array.isArray(v) && typeof v[0] === "string") return v[0];
+  return undefined;
+}
+
+function parseHotSaleDays(raw: string | undefined): number | null {
+  if (raw == null || raw === "") return null;
+  const n = Number(raw);
+  return HOT_SALE_DAYS_ALLOWED.has(n) ? n : null;
 }
 
 const REPORT_PEERS_AUTO = `
@@ -197,6 +213,8 @@ reportRouter.get("/article/:articleId", async (req, res) => {
   }
   const article = articleRes.rows[0] as Record<string, unknown>;
 
+  const hotSaleDays = parseHotSaleDays(firstQueryString(req.query as Record<string, unknown>, "hotSaleDays"));
+
   const [
     priceSeries,
     bestPerRun,
@@ -205,6 +223,7 @@ reportRouter.get("/article/:articleId", async (req, res) => {
     criteria,
     peers,
     scopeRow,
+    hotSaleResumen,
   ] = await Promise.all([
     pool.query(
       useCte
@@ -371,6 +390,9 @@ reportRouter.get("/article/:articleId", async (req, res) => {
           ? [pq.productTitle]
           : [articleId],
     ),
+    hotSaleDays != null
+      ? fetchHotSaleResumenSnapshot(articleId, hotSaleDays)
+      : Promise.resolve(null),
   ]);
 
   const series = priceSeries.rows as { min_price: number; executed_at: string }[];
@@ -422,7 +444,7 @@ reportRouter.get("/article/:articleId", async (req, res) => {
     | { norm_title: string; display_title: string | null }
     | undefined;
 
-  res.json({
+  const body: Record<string, unknown> = {
     generatedAt: new Date().toISOString(),
     article,
     disclaimer,
@@ -450,5 +472,7 @@ reportRouter.get("/article/:articleId", async (req, res) => {
       peerComparisonByBrand: peers.rows,
     },
     recommendation,
-  });
+  };
+  if (hotSaleResumen) body.hotSaleResumen = hotSaleResumen;
+  res.json(body);
 });

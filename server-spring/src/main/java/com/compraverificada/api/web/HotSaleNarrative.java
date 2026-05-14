@@ -22,7 +22,10 @@ public final class HotSaleNarrative {
             double wMax,
             double wMedian,
             double maxDodDropPct,
-            int nPoints) {
+            int nPoints,
+            Double marketFirstMin,
+            Double marketLastMin,
+            Double marketTrendPct) {
         List<String> bullets = new ArrayList<>();
         Map<String, Object> flags = new LinkedHashMap<>();
 
@@ -71,6 +74,28 @@ public final class HotSaleNarrative {
                             + " % entre un día y el siguiente): puede ser promo, cambio de publicaciones o ruido; conviene mirar el listado.");
         }
 
+        if (marketLastMin != null
+                && marketFirstMin != null
+                && marketLastMin > 0
+                && marketFirstMin > 0
+                && lastMin > 0) {
+            if (marketLastMin < lastMin * (1 - PCT_BELOW_MEDIAN)) {
+                String fmtMl = String.format("%,.0f", marketLastMin);
+                String fmtL = String.format("%,.0f", lastMin);
+                bullets.add(
+                        "Entre todas las tiendas del mismo producto, el mejor precio al último relevamiento (" + fmtMl
+                                + ") fue más bajo que el de la tienda que seguimos día a día (" + fmtL
+                                + "): puede haber mejores ofertas en otras publicaciones.");
+            }
+            if (marketTrendPct != null && firstMin > 0) {
+                double anchorTrend = (lastMin - firstMin) / firstMin;
+                if (marketTrendPct < anchorTrend - 0.03 && marketTrendPct < -0.02) {
+                    bullets.add(
+                            "El mínimo entre todas las tiendas cayó más en el período que el de la tienda del primer día: conviene revisar el listado completo, no solo el vendedor que arrancó más barato.");
+                }
+            }
+        }
+
         flags.put("possibleInflatedAnchor", inflatedAnchor);
         flags.put("lastBelowWindowMedian", lastBelowMedian);
         flags.put("lastAboveWindowMedian", lastAboveMedian);
@@ -80,5 +105,16 @@ public final class HotSaleNarrative {
         out.put("bullets", bullets);
         out.put("flags", flags);
         return out;
+    }
+
+    /** Compat: sin serie mercado (no debería usarse si el SQL trae columnas market_*). */
+    public static Map<String, Object> build(
+            double firstMin,
+            double lastMin,
+            double wMax,
+            double wMedian,
+            double maxDodDropPct,
+            int nPoints) {
+        return build(firstMin, lastMin, wMax, wMedian, maxDodDropPct, nPoints, null, null, null);
     }
 }

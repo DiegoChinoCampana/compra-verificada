@@ -12,7 +12,53 @@ import { RESULTS_SCRAPED_LEDE } from "../resultsScrapedLede";
 import { hotSaleListPath, isFromHotSaleState } from "../hotSaleNavState";
 import { isFromResultsState, resultsListPath } from "../resultsNavState";
 import { asHtml2PdfOptions } from "../pdfHtml2PdfOptions";
-import type { ReportPayload } from "../types";
+import type { HotSaleResumenPayload, ReportPayload } from "../types";
+
+function fmtMoneyResumen(n: number): string {
+  return n.toLocaleString("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 });
+}
+
+function HotSaleResumenBlock({ h }: { h: HotSaleResumenPayload }) {
+  const when = new Date(h.lastRunAt).toLocaleDateString("es-AR", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  });
+  const sellerLabel = (s: string | null) =>
+    s == null
+      ? "—"
+      : s === "(sin tienda)"
+        ? "publicación sin nombre de tienda en el dato"
+        : `«${s}»`;
+
+  const lead = `En la última corrida que registramos (${when}), el precio más bajo entre todas las tiendas del mismo producto fue ${fmtMoneyResumen(h.lastRunMinAny)}`;
+  const who =
+    h.lastRunCheapestSeller != null
+      ? ` (listado ligado a la tienda ${sellerLabel(h.lastRunCheapestSeller)}).`
+      : ".";
+
+  const second = h.otherStoreBeatAnchor
+    ? ` Eso queda por debajo de los ${fmtMoneyResumen(h.anchorFirstMin)} con los que arrancó ${sellerLabel(h.anchorSeller)}, la tienda que tenía la oferta más barata el primer día relevado en la ventana de ${h.days} días: entró una oferta más baja desde otra tienda.`
+    : ` Sobre ${sellerLabel(h.anchorSeller)} —la que empezó más barata (${fmtMoneyResumen(h.anchorFirstMin)} ese primer día en la ventana de ${h.days} días—, el «mejor precio del día» solo de esa tienda llegó a subir hasta ${fmtMoneyResumen(h.anchorMaxInWindow)} en algún momento del período (máximo entre los mínimos diarios de esa tienda).`;
+
+  return (
+    <section className="card block client-report__hot-sale-resumen">
+      <h3>Hot Sale · lectura actual</h3>
+      <p className="muted small" style={{ marginBottom: "0.75rem", maxWidth: "48rem" }}>
+        Misma ventana y criterio que la{" "}
+        <Link to={`/guia-hot-sale?days=${h.days}`}>Guía Hot Sale</Link>: producto equivalente (clúster), una corrida por
+        día, ancla en la tienda del listado más barato el primer día.
+      </p>
+      <p className="client-report__lead" style={{ marginBottom: "0.65rem" }}>
+        {lead}
+        {who}
+      </p>
+      <p className="muted small" style={{ maxWidth: "48rem", margin: 0 }}>
+        {second}
+      </p>
+    </section>
+  );
+}
 
 function sanitizeFilenamePart(s: string): string {
   return s.replace(/[/\\?%*:|"<>]/g, "-").replace(/\s+/g, "_").slice(0, 48);
@@ -37,6 +83,18 @@ export function ClientReportPage() {
       ? hotSaleListPath(location.state)
       : "/articulos";
   const backLabel = fromResults ? "Resultados" : fromHotSale ? "Guía Hot Sale" : "Artículos";
+
+  const hotSaleDaysEffective = useMemo((): number | null => {
+    const raw = sp.get("hotSaleDays");
+    const n = raw != null && raw !== "" ? Number(raw) : NaN;
+    if (n === 10 || n === 30 || n === 60) return n;
+    if (fromHotSale && isFromHotSaleState(location.state)) {
+      const d = location.state.days;
+      if (d === 10 || d === 30 || d === 60) return d;
+    }
+    return null;
+  }, [sp, fromHotSale, location.state]);
+
   const reportSuffix = useMemo(() => {
     const q = new URLSearchParams();
     const pk = sp.get("productKey")?.trim();
@@ -45,9 +103,10 @@ export function ClientReportPage() {
     if (pk) q.set("productKey", pk);
     if (pt) q.set("productTitle", pt);
     if (sl) q.set("seller", sl);
+    if (hotSaleDaysEffective != null) q.set("hotSaleDays", String(hotSaleDaysEffective));
     const s = q.toString();
     return s ? `?${s}` : "";
-  }, [sp]);
+  }, [sp, hotSaleDaysEffective]);
 
   const [data, setData] = useState<ReportPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -144,7 +203,7 @@ export function ClientReportPage() {
     return <p>Cargando resumen…</p>;
   }
 
-  const { article, sections, recommendation, generatedAt, analyticsScope } = data;
+  const { article, sections, recommendation, generatedAt, analyticsScope, hotSaleResumen } = data;
   const scopeLine = analyticsScope ? clientScopeSubtitle(analyticsScope) : null;
   const brandDetailLine = [article.brand?.trim(), article.detail?.trim()].filter(Boolean).join(" · ");
 
@@ -207,6 +266,8 @@ export function ClientReportPage() {
             </div>
           </div>
         </header>
+
+        {hotSaleResumen ? <HotSaleResumenBlock h={hotSaleResumen} /> : null}
 
         <section className={`rec ${toneClass[recommendation.tone] ?? "rec rec--neu"} client-report__rec`}>
           <div>
