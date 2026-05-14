@@ -7,6 +7,7 @@ import {
   normalizeTitleForEmbedding,
   upsertResultEmbedding,
 } from "../services/embeddingService.js";
+import { productVariantKeyFromTitle, variantKeysShareCluster } from "./productVariantKey.js";
 
 export type ProductClusteringJobInput = {
   article: string;
@@ -55,7 +56,41 @@ function cosineSimilarity(a: number[], b: number[]): number {
   return 1 - cosineDistance(a, b);
 }
 
-function dbscanCosine(points: number[][], eps: number, minPts: number): number[] {
+/** Claves `160x200` vs `200x200` no se fusionan (listados con/sin medida en título: regla estricta). */
+function clusterDistinctNonNullVariantKeys(
+  labels: number[],
+  variantKeys: (string | null)[],
+  clusterId: number,
+): Set<string> {
+  const s = new Set<string>();
+  for (let i = 0; i < labels.length; i++) {
+    if (labels[i] !== clusterId) continue;
+    const k = variantKeys[i];
+    if (k !== null) s.add(k);
+  }
+  return s;
+}
+
+function canMergeClusterPair(
+  labels: number[],
+  variantKeys: (string | null)[],
+  c1: number,
+  c2: number,
+): boolean {
+  const a = clusterDistinctNonNullVariantKeys(labels, variantKeys, c1);
+  const b = clusterDistinctNonNullVariantKeys(labels, variantKeys, c2);
+  if (a.size === 0 && b.size === 0) return true;
+  if (a.size === 0 || b.size === 0) return false;
+  if (a.size > 1 || b.size > 1) return false;
+  return [...a][0] === [...b][0];
+}
+
+function dbscanCosine(
+  points: number[][],
+  variantKeys: (string | null)[],
+  eps: number,
+  minPts: number,
+): number[] {
   const n = points.length;
   const UNDEF = -2;
   const NOISE = -1;
@@ -65,6 +100,7 @@ function dbscanCosine(points: number[][], eps: number, minPts: number): number[]
     const out: number[] = [];
     for (let j = 0; j < n; j++) {
       if (i === j) continue;
+      if (!variantKeysShareCluster(variantKeys[i] ?? null, variantKeys[j] ?? null)) continue;
       if (cosineDistance(points[i]!, points[j]!) <= eps) out.push(j);
     }
     return out;
@@ -108,6 +144,7 @@ function dbscanCosine(points: number[][], eps: number, minPts: number): number[]
 function mergeClustersByCentroid(
   labels: number[],
   points: number[][],
+  variantKeys: (string | null)[],
   mergeMinSimilarity: number,
 ): number[] {
   const n = labels.length;
@@ -155,7 +192,9 @@ function mergeClustersByCentroid(
       const c2 = clusterIds[j]!;
       const u = centroids.get(c1)!;
       const v = centroids.get(c2)!;
-      if (cosineDistance(u, v) <= mergeDistMax) union(c1, c2);
+      if (cosineDistance(u, v) <= mergeDistMax && canMergeClusterPair(labels, variantKeys, c1, c2)) {
+        union(c1, c2);
+      }
     }
   }
 
@@ -187,6 +226,7 @@ function mergeClustersByCentroid(
 function mergeClustersByMaxPairwiseSim(
   labels: number[],
   points: number[][],
+  variantKeys: (string | null)[],
   mergeMinSimilarity: number,
 ): number[] {
   const n = labels.length;
@@ -232,7 +272,7 @@ function mergeClustersByMaxPairwiseSim(
           if (s > maxSim) maxSim = s;
         }
       }
-      if (maxSim >= mergeMinSimilarity) union(c1, c2);
+      if (maxSim >= mergeMinSimilarity && canMergeClusterPair(labels, variantKeys, c1, c2)) union(c1, c2);
     }
   }
 
@@ -264,6 +304,7 @@ function mergeClustersByMaxPairwiseSim(
 function mergeClustersBySharedTitleAnchors(
   labels: number[],
   titles: (string | null)[],
+  variantKeys: (string | null)[],
   minTokenLen: number,
 ): number[] {
   const n = labels.length;
@@ -309,7 +350,7 @@ function mergeClustersBySharedTitleAnchors(
     const arr = [...set];
     const c0 = arr[0]!;
     for (let k = 1; k < arr.length; k++) {
-      union(c0, arr[k]!);
+      if (canMergeClusterPair(labels, variantKeys, c0, arr[k]!)) union(c0, arr[k]!);
     }
   }
 
@@ -492,6 +533,8 @@ async function runCluster(
     return { clusteredRows: 0, inCluster: 0, noise: 0 };
   }
 
+  const variantKeys = titles.map((t) => productVariantKeyFromTitle(t));
+
   if (opts.resetScope) {
     await pool.query(
       `UPDATE results r
@@ -502,15 +545,15 @@ async function runCluster(
     console.log(`[cluster] reset de claves en ${ids.length} filas a agrupar.`);
   }
 
-  let labels = dbscanCosine(points, eps, opts.minPts);
+  let labels = dbscanCosine(points, variantKeys, eps, opts.minPts);
   if (!opts.skipCentroidMerge) {
-    labels = mergeClustersByCentroid(labels, points, opts.centroidMergeMinSimilarity);
+    labels = mergeClustersByCentroid(labels, points, variantKeys, opts.centroidMergeMinSimilarity);
   }
   if (!opts.skipPairwiseMerge) {
-    labels = mergeClustersByMaxPairwiseSim(labels, points, opts.pairwiseMergeMinSimilarity);
+    labels = mergeClustersByMaxPairwiseSim(labels, points, variantKeys, opts.pairwiseMergeMinSimilarity);
   }
   if (!opts.skipTitleAnchorMerge) {
-    labels = mergeClustersBySharedTitleAnchors(labels, titles, opts.titleAnchorMinLen);
+    labels = mergeClustersBySharedTitleAnchors(labels, titles, variantKeys, opts.titleAnchorMinLen);
   }
   const slug = opts.article.replace(/\s+/g, "_").slice(0, 40);
 

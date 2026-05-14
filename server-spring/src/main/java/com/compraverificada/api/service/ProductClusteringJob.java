@@ -240,6 +240,11 @@ public class ProductClusteringJob {
             return new ClusterStats(0, 0, 0);
         }
 
+        String[] variantKeys = new String[titles.size()];
+        for (int i = 0; i < titles.size(); i++) {
+            variantKeys[i] = ProductVariantKey.fromTitle(titles.get(i));
+        }
+
         if (resetScope) {
             jdbc.update(
                     "UPDATE results SET product_key = NULL, product_cluster_id = NULL, product_confidence = NULL "
@@ -252,15 +257,15 @@ public class ProductClusteringJob {
             log.info("[cluster] reset de claves en {} filas a agrupar.", ids.size());
         }
 
-        int[] labels = dbscanCosine(points, eps, minPts);
+        int[] labels = dbscanCosine(points, variantKeys, eps, minPts);
         if (!skipCentroidMerge) {
-            labels = mergeClustersByCentroid(labels, points, centroidMergeMinSimilarity);
+            labels = mergeClustersByCentroid(labels, points, variantKeys, centroidMergeMinSimilarity);
         }
         if (!skipPairwiseMerge) {
-            labels = mergeClustersByMaxPairwiseSim(labels, points, pairwiseMergeMinSimilarity);
+            labels = mergeClustersByMaxPairwiseSim(labels, points, variantKeys, pairwiseMergeMinSimilarity);
         }
         if (!skipTitleAnchorMerge) {
-            labels = mergeClustersBySharedTitleAnchors(labels, titles, titleAnchorMinLen);
+            labels = mergeClustersBySharedTitleAnchors(labels, titles, variantKeys, titleAnchorMinLen);
         }
 
         String slug = article.replaceAll("\\s+", "_");
@@ -340,7 +345,7 @@ public class ProductClusteringJob {
         return 1.0 - cosineDistance(a, b);
     }
 
-    private static int[] dbscanCosine(List<double[]> points, double eps, int minPts) {
+    private static int[] dbscanCosine(List<double[]> points, String[] variantKeys, double eps, int minPts) {
         final int UNDEF = -2, NOISE = -1;
         int n = points.size();
         int[] labels = new int[n];
@@ -349,7 +354,7 @@ public class ProductClusteringJob {
         int cluster = 0;
         for (int i = 0; i < n; i++) {
             if (labels[i] != UNDEF) continue;
-            List<Integer> neigh = region(points, i, eps);
+            List<Integer> neigh = region(points, variantKeys, i, eps);
             if (neigh.size() + 1 < minPts) {
                 labels[i] = NOISE;
                 continue;
@@ -361,7 +366,7 @@ public class ProductClusteringJob {
                 if (labels[q] == NOISE) labels[q] = cluster;
                 if (labels[q] != UNDEF) continue;
                 labels[q] = cluster;
-                List<Integer> nq = region(points, q, eps);
+                List<Integer> nq = region(points, variantKeys, q, eps);
                 if (nq.size() + 1 >= minPts) {
                     for (int p : nq) {
                         if (labels[p] == UNDEF || labels[p] == NOISE) seeds.add(p);
@@ -373,17 +378,18 @@ public class ProductClusteringJob {
         return labels;
     }
 
-    private static List<Integer> region(List<double[]> points, int i, double eps) {
+    private static List<Integer> region(List<double[]> points, String[] variantKeys, int i, double eps) {
         List<Integer> out = new ArrayList<>();
         double[] base = points.get(i);
         for (int j = 0; j < points.size(); j++) {
             if (i == j) continue;
+            if (!ProductVariantKey.shareCluster(variantKeys[i], variantKeys[j])) continue;
             if (cosineDistance(base, points.get(j)) <= eps) out.add(j);
         }
         return out;
     }
 
-    private static int[] mergeClustersByCentroid(int[] labels, List<double[]> points, double mergeMinSim) {
+    private static int[] mergeClustersByCentroid(int[] labels, List<double[]> points, String[] variantKeys, double mergeMinSim) {
         Set<Integer> ids = new HashSet<>();
         for (int l : labels) if (l >= 0) ids.add(l);
         if (ids.size() <= 1) return labels;
@@ -412,7 +418,8 @@ public class ProductClusteringJob {
         for (int i = 0; i < sortedIds.size(); i++) {
             for (int j = i + 1; j < sortedIds.size(); j++) {
                 int c1 = sortedIds.get(i), c2 = sortedIds.get(j);
-                if (cosineDistance(centroids.get(c1), centroids.get(c2)) <= mergeDistMax) {
+                if (cosineDistance(centroids.get(c1), centroids.get(c2)) <= mergeDistMax
+                        && ProductVariantKey.canMergeClusterPair(labels, variantKeys, c1, c2)) {
                     union(parent, c1, c2);
                 }
             }
@@ -425,7 +432,7 @@ public class ProductClusteringJob {
         return out;
     }
 
-    private static int[] mergeClustersByMaxPairwiseSim(int[] labels, List<double[]> points, double mergeMinSim) {
+    private static int[] mergeClustersByMaxPairwiseSim(int[] labels, List<double[]> points, String[] variantKeys, double mergeMinSim) {
         Set<Integer> ids = new HashSet<>();
         for (int l : labels) if (l >= 0) ids.add(l);
         if (ids.size() <= 1) return labels;
@@ -456,7 +463,9 @@ public class ProductClusteringJob {
                         if (s > maxSim) maxSim = s;
                     }
                 }
-                if (maxSim >= mergeMinSim) union(parent, c1, c2);
+                if (maxSim >= mergeMinSim && ProductVariantKey.canMergeClusterPair(labels, variantKeys, c1, c2)) {
+                    union(parent, c1, c2);
+                }
             }
         }
         int[] out = relabel(labels, parent, sortedIds);
@@ -469,7 +478,7 @@ public class ProductClusteringJob {
 
     private static final Pattern ANCHOR_TOKEN = Pattern.compile("[A-Z0-9]+");
 
-    private static int[] mergeClustersBySharedTitleAnchors(int[] labels, List<String> titles, int minTokenLen) {
+    private static int[] mergeClustersBySharedTitleAnchors(int[] labels, List<String> titles, String[] variantKeys, int minTokenLen) {
         Set<Integer> ids = new HashSet<>();
         for (int l : labels) if (l >= 0) ids.add(l);
         if (ids.size() <= 1) return labels;
@@ -500,10 +509,14 @@ public class ProductClusteringJob {
         for (int c : sortedIds) parent.put(c, c);
         for (Set<Integer> set : tokenToClusters.values()) {
             if (set.size() < 2) continue;
-            Integer first = null;
-            for (int c : set) {
-                if (first == null) first = c;
-                else union(parent, first, c);
+            List<Integer> arr = new ArrayList<>(set);
+            Collections.sort(arr);
+            int c0 = arr.get(0);
+            for (int k = 1; k < arr.size(); k++) {
+                int ck = arr.get(k);
+                if (ProductVariantKey.canMergeClusterPair(labels, variantKeys, c0, ck)) {
+                    union(parent, c0, ck);
+                }
             }
         }
         int[] out = relabel(labels, parent, sortedIds);
