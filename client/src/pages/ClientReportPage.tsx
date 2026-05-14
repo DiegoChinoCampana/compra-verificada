@@ -206,6 +206,8 @@ export function ClientReportPage() {
   const { article, sections, recommendation, generatedAt, analyticsScope, hotSaleResumen } = data;
   const scopeLine = analyticsScope ? clientScopeSubtitle(analyticsScope) : null;
   const brandDetailLine = [article.brand?.trim(), article.detail?.trim()].filter(Boolean).join(" · ");
+  const peerRows = sections.peerComparisonByBrand;
+  const peerMultiBrand = peerRows.length > 1;
 
   return (
     <div className="report client-report">
@@ -300,9 +302,21 @@ export function ClientReportPage() {
         ) : null}
 
         <section className="card block">
-          <h3>Precios de otras marcas (referencia)</h3>
-          <p className="muted small" style={{ marginBottom: "0.75rem" }}>
-            Valores públicos del mismo artículo en otras búsquedas configuradas. La fila resaltada es la tuya.
+          <h3>{peerMultiBrand ? "Tu marca y otras marcas del mismo artículo" : "Tu marca en el comparativo"}</h3>
+          <p className="muted small" style={{ marginBottom: "0.75rem", maxWidth: "48rem" }}>
+            {peerMultiBrand ? (
+              <>
+                Cada fila es una <strong>marca distinta</strong> en el sistema con el mismo artículo y detalle. El
+                precio es el más bajo de la última actualización de esa búsqueda, entre <strong>todas las tiendas</strong>{" "}
+                que aparecieron. La fila resaltada es la tuya.
+              </>
+            ) : (
+              <>
+                Solo está tu marca para este artículo y detalle. El precio es el más bajo de la última actualización de
+                esta búsqueda, entre <strong>todas las tiendas</strong> relevadas. Si sumamos otras marcas con el mismo
+                artículo, verás más filas.
+              </>
+            )}
           </p>
           <div className="table-wrap">
             <table className="table">
@@ -314,7 +328,7 @@ export function ClientReportPage() {
                 </tr>
               </thead>
               <tbody>
-                {sections.peerComparisonByBrand.map((p) => (
+                {peerRows.map((p) => (
                   <tr key={p.id} className={p.id === article.id ? "row-highlight" : undefined}>
                     <td>{p.brand ?? "—"}</td>
                     <td>
@@ -343,24 +357,16 @@ export function ClientReportPage() {
 
         <section className="card block">
           <h3>Cómo se movieron los precios</h3>
-          <p className="muted small" style={{ marginBottom: "0.75rem" }}>
-            Mínimo y promedio relevados en cada actualización (solo publicaciones equivalentes al alcance
-            elegido).
+          <p className="muted small" style={{ marginBottom: "0.75rem", maxWidth: "48rem" }}>
+            En cada fecha, el <strong>más barato del día</strong> entre <strong>cualquier tienda</strong> cuya
+            publicación cuenta como el mismo producto de{" "}
+            {analyticsScope?.scopeMode === "auto" ? "referencia automática" : "este resumen"}. Un dato por día
+            calendario. El promedio es sobre las publicaciones que entran en ese criterio ese día.
           </p>
-          {analyticsScope?.scopeMode === "auto" && analyticsScope.hasCanonicalProduct ? (
-            <p className="muted small" style={{ marginBottom: "0.75rem", maxWidth: "48rem" }}>
-              <strong>¿Faltan fechas que sí ves en Resultados?</strong> Con alcance automático solo
-              entran publicaciones equivalentes al producto de referencia
-              {analyticsScope.displayTitle && !analyticsScope.displayTitle.trim().toLowerCase().startsWith("cluster:")
-                ? ` («${analyticsScope.displayTitle}»)`
-                : ""}
-              . Por día calendario se usa <strong>una</strong> actualización (la última de ese día con datos).
-              Si en Resultados aparece otra variante (modelo, color o texto de publicación distinto) que no
-              coincide con esa referencia, no entra en esta serie aunque comparta categoría y marca. Para
-              acotar a una publicación concreta, abrí este resumen desde el enlace de esa fila en{" "}
-              <Link to="/resultados">Resultados</Link>.
-            </p>
-          ) : null}
+          <p className="muted small no-print" style={{ marginBottom: "0.75rem", maxWidth: "48rem" }}>
+            Tip breve: si un listado de Resultados no aparece acá, suele ser porque el texto del producto no
+            coincide con esa referencia.
+          </p>
           <div className="table-wrap">
             <table className="table">
               <thead>
