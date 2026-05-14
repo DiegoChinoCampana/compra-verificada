@@ -12,6 +12,11 @@ import { OperationalPage } from "./pages/OperationalPage";
 import { ClientReportPage } from "./pages/ClientReportPage";
 import { HotSaleRoundupPage } from "./pages/HotSaleRoundupPage";
 import { ReportPage } from "./pages/ReportPage";
+import {
+  DataDeletionPage,
+  PrivacyPolicyPage,
+  TermsOfServicePage,
+} from "./pages/legal/MetaCompliancePages";
 import "./App.css";
 
 export default function App() {
@@ -33,6 +38,9 @@ export default function App() {
         <Route path="guia-hot-sale" element={<HotSaleRoundupPage />} />
         <Route path="resumen/:id" element={<ClientReportPage />} />
         <Route path="operacion" element={<OperationalPage />} />
+        <Route path="privacidad" element={<PrivacyPolicyPage />} />
+        <Route path="terminos" element={<TermsOfServicePage />} />
+        <Route path="eliminacion-datos" element={<DataDeletionPage />} />
       </Route>
     </Routes>
   );

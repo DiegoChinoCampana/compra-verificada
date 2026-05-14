@@ -20,6 +20,9 @@
     { "source": "/analisis/:path*", "destination": "/index.html" },
     { "source": "/guia-hot-sale", "destination": "/index.html" },
     { "source": "/guia-hot-sale/:path*", "destination": "/index.html" },
+    { "source": "/privacidad", "destination": "/index.html" },
+    { "source": "/terminos", "destination": "/index.html" },
+    { "source": "/eliminacion-datos", "destination": "/index.html" },
     { "source": "/operacion/:path*", "destination": "/index.html" },
     {
       "source": "/((?!api/).*)",
