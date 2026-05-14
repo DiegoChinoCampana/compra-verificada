@@ -8,19 +8,29 @@ import { handleInboundText } from "../whatsapp/botEngine.js";
 
 export const metaWhatsappWebhookRouter = Router();
 
-metaWhatsappWebhookRouter.get("/", (req: Request, res: Response) => {
+function handleWebhookVerification(req: Request, res: Response): void {
   const verifyToken = (process.env.META_WHATSAPP_VERIFY_TOKEN ?? "").trim();
   if (!verifyToken) {
-    res.status(503).send("META_WHATSAPP_VERIFY_TOKEN no configurado");
+    console.error("[whatsapp] GET verify: META_WHATSAPP_VERIFY_TOKEN vacío en el servidor");
+    res.status(503).type("text/plain").send("META_WHATSAPP_VERIFY_TOKEN no configurado");
     return;
   }
   const { mode, verifyToken: sent, challenge } = readHubChallengeParams(req);
-  if (mode === "subscribe" && sent === verifyToken && challenge) {
-    res.status(200).send(challenge);
+  const sentTrim = sent?.trim() ?? "";
+  if (mode === "subscribe" && sentTrim === verifyToken && challenge !== undefined && challenge !== "") {
+    /** Meta exige el challenge en texto plano, sin JSON ni comillas. */
+    res.status(200).type("text/plain").send(challenge);
     return;
   }
-  res.status(403).send("Forbidden");
-});
+  console.warn("[whatsapp] GET verify falló", {
+    mode: mode ?? null,
+    tokenCoincide: sentTrim === verifyToken,
+    tieneChallenge: Boolean(challenge),
+  });
+  res.status(403).type("text/plain").send("Forbidden");
+}
+
+metaWhatsappWebhookRouter.get(["/", ""], handleWebhookVerification);
 
 metaWhatsappWebhookRouter.post("/", async (req: Request, res: Response) => {
   const secret = (process.env.META_APP_SECRET ?? "").trim();
