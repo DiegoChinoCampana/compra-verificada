@@ -10,7 +10,8 @@
     "dev": "concurrently -n api,web -c blue,green \"npm run dev --prefix server\" \"npm run dev --prefix client\"",
     "build": "npm run build --prefix server && npm run build --prefix client",
     "vercel-build": "npm run build",
-    "start": "npm run start --prefix server"
+    "start": "npm run start --prefix server",
+    "war:build": "mvn -B -f server-spring/pom.xml clean package -DskipTests"
   },
   "dependencies": {
     "@vercel/node": "^5.5.9",
