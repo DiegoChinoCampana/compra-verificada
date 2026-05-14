@@ -1,6 +1,6 @@
 /**
  * Batch offline: embeddings + clustering semántico (DBSCAN) → `results.product_key` / `product_cluster_id`.
- * El agrupamiento exige además la misma medida en el título cuando existe (`160x200` vs `200x200`), no solo embedding cercano.
+ * El agrupamiento exige además la misma “firma” de medidas en el título cuando existe (2D/3D tipo 160x200, ml/L, cm³, pulgadas, etc.), no solo embedding cercano.
  *
  * Uso (desde carpeta `server/`, con .env cargado):
  *   npx tsx scripts/clusterProducts.ts --article=Microondas --days=60
