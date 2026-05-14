@@ -3,6 +3,9 @@ import { NavLink, Outlet } from "react-router-dom";
 const navCls = ({ isActive }: { isActive: boolean }) =>
   isActive ? "navlink navlink--active" : "navlink";
 
+const footerLinkCls = ({ isActive }: { isActive: boolean }) =>
+  isActive ? "site-footer__link site-footer__link--active" : "site-footer__link";
+
 export function Layout() {
   return (
     <div className="shell">
@@ -42,6 +45,27 @@ export function Layout() {
       <main className="main">
         <Outlet />
       </main>
+      <footer className="site-footer">
+        <div className="site-footer__inner">
+          <nav className="site-footer__links" aria-label="Información legal">
+            <NavLink to="/privacidad" className={footerLinkCls}>
+              Política de privacidad
+            </NavLink>
+            <span className="site-footer__sep" aria-hidden>
+              ·
+            </span>
+            <NavLink to="/terminos" className={footerLinkCls}>
+              Términos del servicio
+            </NavLink>
+            <span className="site-footer__sep" aria-hidden>
+              ·
+            </span>
+            <NavLink to="/eliminacion-datos" className={footerLinkCls}>
+              Eliminación de datos
+            </NavLink>
+          </nav>
+        </div>
+      </footer>
     </div>
   );
 }
