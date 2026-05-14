@@ -197,7 +197,10 @@ export function HotSaleRoundupPage() {
               otras tiendas que ya existían a otro precio (evita confundir “cambió el vendedor” con “bajó el precio”).
               Cuando <strong>otra tienda</strong> publica más barato, <strong>sí lo mostramos</strong> en la segunda
               lectura de cada fila (<strong>Todas las tiendas</strong>): ahí el mínimo del día es entre{" "}
-              <em>cualquier</em> vendedor del mismo producto y la tendencia refleja ese mejor precio global.
+              <em>cualquier</em> vendedor del mismo producto y la tendencia refleja ese mejor precio global. El
+              criterio de &quot;mismo producto&quot; usa la misma lógica que el tablero: se mira una ventana de hasta{" "}
+              <strong>365 días</strong> para fijar el producto de referencia; los porcentajes y flechas siguen usando
+              solo los <strong>N días</strong> que elegís arriba.
             </p>
           </div>
         </div>

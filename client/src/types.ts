@@ -250,6 +250,9 @@ export type HotSaleResumenPayload = {
   days: number;
   lastRunAt: string;
   lastRunMinAny: number;
+  /** Desde backend reciente; si falta, no mostramos línea de tendencia. */
+  marketFirstMin?: number;
+  marketTrendPct?: number;
   lastRunCheapestSeller: string | null;
   anchorSeller: string | null;
   anchorFirstMin: number;

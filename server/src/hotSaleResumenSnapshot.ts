@@ -11,6 +11,10 @@ export type HotSaleResumenSnapshot = {
   days: number;
   lastRunAt: string;
   lastRunMinAny: number;
+  /** Mínimo del primer día con dato en la ventana, entre todas las tiendas (mismo producto). */
+  marketFirstMin: number;
+  /** (último mínimo mercado − primer mínimo mercado) / primer mínimo mercado. */
+  marketTrendPct: number;
   lastRunCheapestSeller: string | null;
   anchorSeller: string | null;
   anchorFirstMin: number;
@@ -38,13 +42,26 @@ runs_one_per_day AS (
     AND sr.executed_at >= NOW() - (p.days_window * interval '1 day')
   ORDER BY r.search_id, date_trunc('day', sr.executed_at), sr.executed_at DESC
 ),
+runs_one_per_day_canonical AS (
+  SELECT DISTINCT ON (r.search_id, date_trunc('day', sr.executed_at))
+    r.search_id,
+    sr.id AS scrape_run_id,
+    sr.executed_at
+  FROM results r
+  INNER JOIN scrape_runs sr ON sr.id = r.scrape_run_id
+  INNER JOIN articles a ON a.id = r.search_id AND a.enabled = TRUE
+  WHERE r.search_id = $1
+    AND r.price IS NOT NULL AND r.price > 0
+    AND sr.executed_at >= NOW() - interval '365 days'
+  ORDER BY r.search_id, date_trunc('day', sr.executed_at), sr.executed_at DESC
+),
 run_cheapest_key AS (
   SELECT DISTINCT ON (d.search_id, d.scrape_run_id)
     d.search_id,
     d.scrape_run_id,
     d.executed_at,
     ${sqlProductGroupingKey("r")} AS gk
-  FROM runs_one_per_day d
+  FROM runs_one_per_day_canonical d
   INNER JOIN results r ON r.search_id = d.search_id AND r.scrape_run_id = d.scrape_run_id
   WHERE r.price IS NOT NULL AND r.price > 0
     AND ${sqlWhereRespectClusterWhenPresent("r")}
@@ -122,6 +139,13 @@ last_market AS (
   ORDER BY executed_at DESC
   LIMIT 1
 ),
+first_market AS (
+  SELECT search_id, scrape_run_id, executed_at, min_price
+  FROM run_mins_market
+  WHERE search_id = $1
+  ORDER BY executed_at ASC
+  LIMIT 1
+),
 first_anchor AS (
   SELECT search_id, scrape_run_id, executed_at, min_price
   FROM run_mins
@@ -156,9 +180,11 @@ SELECT
     LIMIT 1
   ) AS last_run_cheapest_seller,
   fa.min_price::float8 AS anchor_first_min,
+  fm.min_price::float8 AS market_first_min,
   COALESCE(aw.w_max, 0)::float8 AS anchor_max_in_window,
   an.seller_key::text AS anchor_seller
 FROM last_market lm
+INNER JOIN first_market fm ON fm.search_id = lm.search_id
 INNER JOIN first_anchor fa ON fa.search_id = lm.search_id
 CROSS JOIN anchor_w_max aw
 INNER JOIN anchor_seller an ON an.search_id = lm.search_id
@@ -178,6 +204,7 @@ export async function fetchHotSaleResumenSnapshot(
 
   const lastRunMinAny = Number(r.last_run_min_any);
   const anchorFirstMin = Number(r.anchor_first_min);
+  const marketFirstMin = Number(r.market_first_min);
   const anchorMaxInWindow = Number(r.anchor_max_in_window);
   const lastAt = r.last_run_at;
   if (
@@ -185,11 +212,15 @@ export async function fetchHotSaleResumenSnapshot(
     lastRunMinAny <= 0 ||
     !Number.isFinite(anchorFirstMin) ||
     anchorFirstMin <= 0 ||
+    !Number.isFinite(marketFirstMin) ||
+    marketFirstMin <= 0 ||
     !Number.isFinite(anchorMaxInWindow) ||
     lastAt == null
   ) {
     return null;
   }
+
+  const marketTrendPct = (lastRunMinAny - marketFirstMin) / marketFirstMin;
 
   const lrcs = r.last_run_cheapest_seller;
   const lastRunCheapestSeller =
@@ -209,6 +240,8 @@ export async function fetchHotSaleResumenSnapshot(
     days,
     lastRunAt: new Date(lastAt as string).toISOString(),
     lastRunMinAny,
+    marketFirstMin,
+    marketTrendPct,
     lastRunCheapestSeller,
     anchorSeller,
     anchorFirstMin,

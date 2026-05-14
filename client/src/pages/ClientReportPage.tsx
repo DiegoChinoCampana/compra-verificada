@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link, useLocation, useParams, useSearchParams } from "react-router-dom";
 import { fetchJson } from "../api";
 import {
@@ -18,43 +18,79 @@ function fmtMoneyResumen(n: number): string {
   return n.toLocaleString("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 });
 }
 
+/** Evita mostrar IDs crudos de ML al usuario final. */
+function sellerReadable(s: string | null): string {
+  if (s == null || !String(s).trim()) return "un vendedor en Mercado Libre";
+  const t = String(s).trim();
+  if (t === "(sin tienda)") return "una publicación sin nombre de tienda en el dato";
+  if (t.length >= 18 && /^[a-z0-9_-]+$/i.test(t)) return "un vendedor en Mercado Libre";
+  return `«${t}»`;
+}
+
 function HotSaleResumenBlock({ h }: { h: HotSaleResumenPayload }) {
   const when = new Date(h.lastRunAt).toLocaleDateString("es-AR", {
     day: "numeric",
     month: "long",
     year: "numeric",
   });
-  const sellerLabel = (s: string | null) =>
-    s == null
-      ? "—"
-      : s === "(sin tienda)"
-        ? "publicación sin nombre de tienda en el dato"
-        : `«${s}»`;
+  const first = h.marketFirstMin;
+  const tr =
+    h.marketTrendPct != null && Number.isFinite(h.marketTrendPct)
+      ? h.marketTrendPct
+      : first != null && first > 0
+        ? (h.lastRunMinAny - first) / first
+        : NaN;
 
-  const lead = `En la última corrida que registramos (${when}), el precio más bajo entre todas las tiendas del mismo producto fue ${fmtMoneyResumen(h.lastRunMinAny)}`;
-  const who =
-    h.lastRunCheapestSeller != null
-      ? ` (listado ligado a la tienda ${sellerLabel(h.lastRunCheapestSeller)}).`
-      : ".";
+  const absPct = Number.isFinite(tr) ? `${Math.abs(tr * 100).toFixed(1)} %` : null;
 
-  const second = h.otherStoreBeatAnchor
-    ? ` Eso queda por debajo de los ${fmtMoneyResumen(h.anchorFirstMin)} con los que arrancó ${sellerLabel(h.anchorSeller)}, la tienda que tenía la oferta más barata el primer día relevado en la ventana de ${h.days} días: entró una oferta más baja desde otra tienda.`
-    : ` Sobre ${sellerLabel(h.anchorSeller)} —la que empezó más barata (${fmtMoneyResumen(h.anchorFirstMin)} ese primer día en la ventana de ${h.days} días—, el «mejor precio del día» solo de esa tienda llegó a subir hasta ${fmtMoneyResumen(h.anchorMaxInWindow)} en algún momento del período (máximo entre los mínimos diarios de esa tienda).`;
+  let trendLine: ReactNode = null;
+  if (Number.isFinite(tr) && absPct) {
+    if (tr < -0.005) {
+      trendLine = (
+        <>
+          Comparado con el primer día con precio en ese período de {h.days} días, ese mínimo entre todas las tiendas{" "}
+          <strong>bajó</strong> alrededor de <strong>{absPct}</strong>.
+        </>
+      );
+    } else if (tr > 0.005) {
+      trendLine = (
+        <>
+          Comparado con el primer día con precio en ese período de {h.days} días, ese mínimo entre todas las tiendas{" "}
+          <strong>subió</strong> alrededor de <strong>{absPct}</strong>.
+        </>
+      );
+    } else {
+      trendLine = (
+        <>
+          Respecto al inicio de esos {h.days} días, ese mínimo entre tiendas <strong>se mantuvo casi igual</strong>.
+        </>
+      );
+    }
+  }
 
   return (
     <section className="card block client-report__hot-sale-resumen">
-      <h3>Hot Sale · lectura actual</h3>
+      <h3>Precio más bajo del producto</h3>
       <p className="muted small" style={{ marginBottom: "0.75rem", maxWidth: "48rem" }}>
-        Misma ventana y criterio que la{" "}
-        <Link to={`/guia-hot-sale?days=${h.days}`}>Guía Hot Sale</Link>: producto equivalente (clúster), una corrida por
-        día, ancla en la tienda del listado más barato el primer día.
+        Igual que en la <Link to={`/guia-hot-sale?days=${h.days}`}>Guía Hot Sale</Link>: últimos{" "}
+        <strong>{h.days}</strong> días para la tendencia; el &quot;mismo producto&quot; se alinea con el tablero usando
+        hasta <strong>365 días</strong> de historia para fijar la referencia. El precio más bajo es entre{" "}
+        <strong>cualquier</strong> tienda que venda ese producto.
       </p>
-      <p className="client-report__lead" style={{ marginBottom: "0.65rem" }}>
-        {lead}
-        {who}
+      <p className="client-report__lead" style={{ marginBottom: "0.5rem" }}>
+        <strong>Ahora el más barato que tenemos anotado:</strong> {fmtMoneyResumen(h.lastRunMinAny)}
+        <span className="muted"> (última actualización con dato: {when}).</span>
       </p>
+      {trendLine ? (
+        <p className="muted small" style={{ marginBottom: "0.5rem", maxWidth: "48rem" }}>
+          {trendLine}
+        </p>
+      ) : null}
       <p className="muted small" style={{ maxWidth: "48rem", margin: 0 }}>
-        {second}
+        Ese valor venía de <strong>{sellerReadable(h.lastRunCheapestSeller)}</strong>.
+        {h.otherStoreBeatAnchor
+          ? " Es más bajo que la oferta más barata del primer día de la ventana, cuando lideraba otra tienda."
+          : null}
       </p>
     </section>
   );

@@ -56,13 +56,25 @@ public class HotSaleRoundupService {
                 AND sr.executed_at >= NOW() - (p.days_window * interval '1 day')
               ORDER BY r.search_id, date_trunc('day', sr.executed_at), sr.executed_at DESC
             ),
+            runs_one_per_day_canonical AS (
+              SELECT DISTINCT ON (r.search_id, date_trunc('day', sr.executed_at))
+                r.search_id,
+                sr.id AS scrape_run_id,
+                sr.executed_at
+              FROM results r
+              INNER JOIN scrape_runs sr ON sr.id = r.scrape_run_id
+              INNER JOIN articles a ON a.id = r.search_id AND a.enabled = TRUE
+              WHERE r.price IS NOT NULL AND r.price > 0
+                AND sr.executed_at >= NOW() - interval '365 days'
+              ORDER BY r.search_id, date_trunc('day', sr.executed_at), sr.executed_at DESC
+            ),
             run_cheapest_key AS (
               SELECT DISTINCT ON (d.search_id, d.scrape_run_id)
                 d.search_id,
                 d.scrape_run_id,
                 d.executed_at,
                 /*GK*/ AS gk
-              FROM runs_one_per_day d
+              FROM runs_one_per_day_canonical d
               INNER JOIN results r ON r.search_id = d.search_id AND r.scrape_run_id = d.scrape_run_id
               WHERE r.price IS NOT NULL AND r.price > 0/*CF*/
                 AND length(trim(/*GK*/)) > 0

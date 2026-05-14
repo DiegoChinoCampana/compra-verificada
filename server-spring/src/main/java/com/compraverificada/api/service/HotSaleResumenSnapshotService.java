@@ -52,13 +52,26 @@ public class HotSaleResumenSnapshotService {
                 AND sr.executed_at >= NOW() - (p.days_window * interval '1 day')
               ORDER BY r.search_id, date_trunc('day', sr.executed_at), sr.executed_at DESC
             ),
+            runs_one_per_day_canonical AS (
+              SELECT DISTINCT ON (r.search_id, date_trunc('day', sr.executed_at))
+                r.search_id,
+                sr.id AS scrape_run_id,
+                sr.executed_at
+              FROM results r
+              INNER JOIN scrape_runs sr ON sr.id = r.scrape_run_id
+              INNER JOIN articles a ON a.id = r.search_id AND a.enabled = TRUE
+              WHERE r.search_id = :articleId
+                AND r.price IS NOT NULL AND r.price > 0
+                AND sr.executed_at >= NOW() - interval '365 days'
+              ORDER BY r.search_id, date_trunc('day', sr.executed_at), sr.executed_at DESC
+            ),
             run_cheapest_key AS (
               SELECT DISTINCT ON (d.search_id, d.scrape_run_id)
                 d.search_id,
                 d.scrape_run_id,
                 d.executed_at,
                 /*GK*/ AS gk
-              FROM runs_one_per_day d
+              FROM runs_one_per_day_canonical d
               INNER JOIN results r ON r.search_id = d.search_id AND r.scrape_run_id = d.scrape_run_id
               WHERE r.price IS NOT NULL AND r.price > 0/*CF*/
                 AND length(trim(/*GK*/)) > 0
@@ -131,6 +144,13 @@ public class HotSaleResumenSnapshotService {
               ORDER BY executed_at DESC
               LIMIT 1
             ),
+            first_market AS (
+              SELECT search_id, scrape_run_id, executed_at, min_price
+              FROM run_mins_market
+              WHERE search_id = :articleId
+              ORDER BY executed_at ASC
+              LIMIT 1
+            ),
             first_anchor AS (
               SELECT search_id, scrape_run_id, executed_at, min_price
               FROM run_mins
@@ -164,9 +184,11 @@ public class HotSaleResumenSnapshotService {
                 LIMIT 1
               ) AS last_run_cheapest_seller,
               fa.min_price::float8 AS anchor_first_min,
+              fm.min_price::float8 AS market_first_min,
               COALESCE(aw.w_max, 0)::float8 AS anchor_max_in_window,
               an.seller_key::text AS anchor_seller
             FROM last_market lm
+            INNER JOIN first_market fm ON fm.search_id = lm.search_id
             INNER JOIN first_anchor fa ON fa.search_id = lm.search_id
             CROSS JOIN anchor_w_max aw
             INNER JOIN anchor_seller an ON an.search_id = lm.search_id
@@ -186,15 +208,19 @@ public class HotSaleResumenSnapshotService {
         }
         Map<String, Object> r = rows.get(0);
         Double lastRunMinAny = asDouble(r.get("last_run_min_any"));
+        Double marketFirstMin = asDouble(r.get("market_first_min"));
         Double anchorFirstMin = asDouble(r.get("anchor_first_min"));
         Double anchorMaxInWindow = asDouble(r.get("anchor_max_in_window"));
         Object lastAt = r.get("last_run_at");
         if (lastRunMinAny == null || lastRunMinAny <= 0
+                || marketFirstMin == null || marketFirstMin <= 0
                 || anchorFirstMin == null || anchorFirstMin <= 0
                 || anchorMaxInWindow == null || !Double.isFinite(anchorMaxInWindow)
                 || lastAt == null) {
             return null;
         }
+
+        double marketTrendPct = (lastRunMinAny - marketFirstMin) / marketFirstMin;
 
         String lastRunCheapestSeller = stringifyOrNull(r.get("last_run_cheapest_seller"));
         String anchorSeller = stringifyOrNull(r.get("anchor_seller"));
@@ -216,6 +242,8 @@ public class HotSaleResumenSnapshotService {
         out.put("days", days);
         out.put("lastRunAt", lastRunIso);
         out.put("lastRunMinAny", lastRunMinAny);
+        out.put("marketFirstMin", marketFirstMin);
+        out.put("marketTrendPct", marketTrendPct);
         out.put("lastRunCheapestSeller", lastRunCheapestSeller);
         out.put("anchorSeller", anchorSeller);
         out.put("anchorFirstMin", anchorFirstMin);
