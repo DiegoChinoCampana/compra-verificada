@@ -294,6 +294,8 @@ export type HotSaleVotedRoundupRow = {
   w_max: number | null;
   w_median: number | null;
   max_dod_drop_pct: number | null;
+  /** Tienda ancla: misma lógica que topPriceDrops (vendedor del listado más barato del primer día en el clúster). */
+  trend_seller?: string | null;
   narrative: HotSaleNarrativePayload | null;
 };
 
@@ -310,6 +312,7 @@ export type HotSalePriceDropRow = {
   w_max: number;
   w_median: number;
   max_dod_drop_pct: number;
+  trend_seller?: string | null;
   narrative: HotSaleNarrativePayload;
 };
 

@@ -2,6 +2,7 @@ import { pool } from "./db.js";
 import { loadHotSaleVotedSlots, type HotSaleVotedSlot } from "./config/hotSaleVoted.js";
 import { buildHotSaleNarrative, type HotSaleNarrative } from "./hotSaleNarrative.js";
 import {
+  sqlNormSeller,
   sqlProductGroupingKey,
   sqlWhereRespectClusterWhenPresent,
 } from "./sql/articleSameProductTitle.js";
@@ -13,6 +14,8 @@ export type HotSaleTrendRow = {
   article: string;
   brand: string | null;
   detail: string | null;
+  /** Tienda normalizada usada como ancla (la del listado más barato del primer día con ese clúster). */
+  trend_seller: string | null;
   first_min: number;
   last_min: number;
   trend_pct: number;
@@ -46,6 +49,7 @@ export type HotSaleVotedPayloadRow = {
   w_max: number | null;
   w_median: number | null;
   max_dod_drop_pct: number | null;
+  trend_seller: string | null;
   narrative: HotSaleNarrative | null;
 };
 
@@ -103,14 +107,42 @@ canonical_per_article AS (
   ) z
   WHERE rn = 1
 ),
-run_mins AS (
-  SELECT d.search_id, d.scrape_run_id, d.executed_at, MIN(r.price)::float8 AS min_price
+first_run_for_article AS (
+  SELECT DISTINCT ON (d.search_id)
+    d.search_id,
+    d.scrape_run_id,
+    d.executed_at
   FROM runs_one_per_day d
   INNER JOIN canonical_per_article ck ON ck.search_id = d.search_id
   INNER JOIN results r ON r.search_id = d.search_id AND r.scrape_run_id = d.scrape_run_id
   WHERE r.price IS NOT NULL AND r.price > 0
     AND ${sqlWhereRespectClusterWhenPresent("r")}
     AND ${sqlProductGroupingKey("r")} = ck.canonical_gk
+    AND length(trim(${sqlProductGroupingKey("r")})) > 0
+  ORDER BY d.search_id, d.executed_at ASC
+),
+anchor_seller AS (
+  SELECT DISTINCT ON (fr.search_id)
+    fr.search_id,
+    ${sqlNormSeller("r")} AS seller_key
+  FROM first_run_for_article fr
+  INNER JOIN canonical_per_article ck ON ck.search_id = fr.search_id
+  INNER JOIN results r ON r.search_id = fr.search_id AND r.scrape_run_id = fr.scrape_run_id
+  WHERE r.price IS NOT NULL AND r.price > 0
+    AND ${sqlWhereRespectClusterWhenPresent("r")}
+    AND ${sqlProductGroupingKey("r")} = ck.canonical_gk
+  ORDER BY fr.search_id, r.price ASC NULLS LAST, r.id ASC
+),
+run_mins AS (
+  SELECT d.search_id, d.scrape_run_id, d.executed_at, MIN(r.price)::float8 AS min_price
+  FROM runs_one_per_day d
+  INNER JOIN canonical_per_article ck ON ck.search_id = d.search_id
+  INNER JOIN anchor_seller an ON an.search_id = d.search_id
+  INNER JOIN results r ON r.search_id = d.search_id AND r.scrape_run_id = d.scrape_run_id
+  WHERE r.price IS NOT NULL AND r.price > 0
+    AND ${sqlWhereRespectClusterWhenPresent("r")}
+    AND ${sqlProductGroupingKey("r")} = ck.canonical_gk
+    AND ${sqlNormSeller("r")} = an.seller_key
   GROUP BY d.search_id, d.scrape_run_id, d.executed_at
 ),
 daily AS (
@@ -184,6 +216,7 @@ SELECT
   a.article,
   a.brand,
   a.detail,
+  an.seller_key::text AS trend_seller,
   t.first_min::float8,
   t.last_min::float8,
   t.trend_pct::float8,
@@ -194,6 +227,7 @@ SELECT
   t.max_dod_drop_pct::float8
 FROM trends t
 INNER JOIN articles a ON a.id = t.article_id AND a.enabled = TRUE
+INNER JOIN anchor_seller an ON an.search_id = t.article_id
 `;
 
 function parseDays(raw: unknown): number {
@@ -211,6 +245,9 @@ function rowToTrendPayload(r: Record<string, unknown>): HotSaleTrendRow {
   const w_max = Number(r.w_max);
   const w_median = Number(r.w_median);
   const max_dod_drop_pct = Number(r.max_dod_drop_pct);
+  const ts = r.trend_seller;
+  const trend_seller =
+    ts == null || String(ts).trim() === "" ? null : String(ts);
   const narrative = buildHotSaleNarrative({
     first_min,
     last_min,
@@ -224,6 +261,7 @@ function rowToTrendPayload(r: Record<string, unknown>): HotSaleTrendRow {
     article: String(r.article ?? ""),
     brand: r.brand == null ? null : String(r.brand),
     detail: r.detail == null ? null : String(r.detail),
+    trend_seller,
     first_min,
     last_min,
     trend_pct,
@@ -352,6 +390,7 @@ function buildVotedRows(
         w_max: null,
         w_median: null,
         max_dod_drop_pct: null,
+        trend_seller: null,
         narrative: null,
       };
     }
@@ -376,6 +415,7 @@ function buildVotedRows(
         w_max: null,
         w_median: null,
         max_dod_drop_pct: null,
+        trend_seller: null,
         narrative: null,
       };
     }
@@ -397,6 +437,7 @@ function buildVotedRows(
       w_max: t.w_max,
       w_median: t.w_median,
       max_dod_drop_pct: t.max_dod_drop_pct,
+      trend_seller: t.trend_seller,
       narrative: t.narrative,
     };
   });

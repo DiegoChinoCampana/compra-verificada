@@ -21,9 +21,20 @@ function fmtPct(n: number | null | undefined): string {
 
 function trendPhrase(pct: number | null): string | null {
   if (pct == null || !Number.isFinite(pct)) return null;
-  if (pct < -0.005) return "En la ventana, el precio mínimo relevado bajó respecto al inicio.";
-  if (pct > 0.005) return "En la ventana, el precio mínimo relevado subió respecto al inicio.";
-  return "Precio mínimo relevado relativamente estable en la ventana.";
+  if (pct < -0.005)
+    return "En la ventana, el precio mínimo de la tienda de referencia bajó respecto al inicio.";
+  if (pct > 0.005)
+    return "En la ventana, el precio mínimo de la tienda de referencia subió respecto al inicio.";
+  return "Precio mínimo de la tienda de referencia relativamente estable en la ventana.";
+}
+
+function trendSellerCaption(seller: string | null | undefined): string | null {
+  if (seller == null || !String(seller).trim()) return null;
+  const s = String(seller).trim();
+  if (s.toLowerCase() === "(sin tienda)") {
+    return "Referencia: listados sin nombre de tienda en el primer día (mismo producto en el clúster).";
+  }
+  return `Referencia: tienda «${s}» (listado más barato al primer día relevado de ese producto).`;
 }
 
 function NarrativeBlock({ narrative }: { narrative: HotSaleNarrativePayload | null | undefined }) {
@@ -154,8 +165,10 @@ export function HotSaleRoundupPage() {
           </select>
         </label>
         <span className="muted small" style={{ marginLeft: "1rem" }}>
-          Misma lógica que el tablero: una actualización por día y ficha; comparamos el mínimo de la primera y la
-          última en la ventana (no es un “histórico completo” del Hot Sale).
+          Por ficha se elige el <strong>mismo producto</strong> que en el tablero (clúster) y una{" "}
+          <strong>tienda ancla</strong>: la del listado más barato al <em>primer</em> día con dato; los mínimos y
+          la tendencia comparan solo publicaciones de esa tienda y ese producto (no mezclamos otras tiendas que
+          ya existían al otro precio).
         </span>
       </form>
 
@@ -212,9 +225,9 @@ export function HotSaleRoundupPage() {
             ) : null}
             <p className="muted small">
               Además del primer vs último día con dato, miramos el <strong>rango y la mediana</strong> de los mínimos
-              diarios y si hubo <strong>caídas fuertes</strong> entre un día y el siguiente; eso ayuda a detectar
-              patrones tipo precios más altos antes de una baja (posible “inflado”) y no guiarse solo por el último
-              número.
+              diarios <strong>de la tienda ancla</strong> y si hubo <strong>caídas fuertes</strong> entre un día y el
+              siguiente; eso ayuda a detectar patrones tipo precios más altos antes de una baja (posible “inflado”) y
+              no guiarse solo por el último número.
             </p>
             <div className="table-wrap">
               <table className="table">
@@ -278,6 +291,10 @@ export function HotSaleRoundupPage() {
                           <>
                             <span title="Primer vs último mínimo en la ventana">{fmtPct(r.trend_pct)}</span>
                             <div className="muted small">{trendPhrase(r.trend_pct)}</div>
+                            {(() => {
+                              const c = trendSellerCaption(r.trend_seller);
+                              return c ? <div className="muted small">{c}</div> : null;
+                            })()}
                             <div className="muted small">
                               {fmtMoney(r.first_min)} → {fmtMoney(r.last_min)}
                             </div>
@@ -343,6 +360,10 @@ export function HotSaleRoundupPage() {
                         <td>
                           <strong>{fmtPct(r.trend_pct)}</strong>
                           <div className="muted small">{trendPhrase(r.trend_pct)}</div>
+                          {(() => {
+                            const c = trendSellerCaption(r.trend_seller);
+                            return c ? <div className="muted small">{c}</div> : null;
+                          })()}
                           <WindowRangeLine
                             w_min={r.w_min}
                             w_median={r.w_median}

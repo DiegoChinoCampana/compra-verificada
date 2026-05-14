@@ -34,7 +34,9 @@ public class HotSaleRoundupService {
     private static String trendsSql() {
         return TRENDS_SQL_TEMPLATE
                 .replace("/*GK*/", SqlSnippets.productGroupingKey("r"))
-                .replace("/*CF*/", " AND " + SqlSnippets.whereRespectClusterWhenPresent("r"));
+                .replace("/*CF*/", " AND " + SqlSnippets.whereRespectClusterWhenPresent("r"))
+                .replace("/*SK*/", SqlSnippets.normSeller("r"));
+
     }
 
     private static final String TRENDS_SQL_TEMPLATE = """
@@ -82,13 +84,39 @@ public class HotSaleRoundupService {
               ) z
               WHERE rn = 1
             ),
-            run_mins AS (
-              SELECT d.search_id, d.scrape_run_id, d.executed_at, MIN(r.price)::float8 AS min_price
+            first_run_for_article AS (
+              SELECT DISTINCT ON (d.search_id)
+                d.search_id,
+                d.scrape_run_id,
+                d.executed_at
               FROM runs_one_per_day d
               INNER JOIN canonical_per_article ck ON ck.search_id = d.search_id
               INNER JOIN results r ON r.search_id = d.search_id AND r.scrape_run_id = d.scrape_run_id
               WHERE r.price IS NOT NULL AND r.price > 0/*CF*/
                 AND /*GK*/ = ck.canonical_gk
+                AND length(trim(/*GK*/)) > 0
+              ORDER BY d.search_id, d.executed_at ASC
+            ),
+            anchor_seller AS (
+              SELECT DISTINCT ON (fr.search_id)
+                fr.search_id,
+                /*SK*/ AS seller_key
+              FROM first_run_for_article fr
+              INNER JOIN canonical_per_article ck ON ck.search_id = fr.search_id
+              INNER JOIN results r ON r.search_id = fr.search_id AND r.scrape_run_id = fr.scrape_run_id
+              WHERE r.price IS NOT NULL AND r.price > 0/*CF*/
+                AND /*GK*/ = ck.canonical_gk
+              ORDER BY fr.search_id, r.price ASC NULLS LAST, r.id ASC
+            ),
+            run_mins AS (
+              SELECT d.search_id, d.scrape_run_id, d.executed_at, MIN(r.price)::float8 AS min_price
+              FROM runs_one_per_day d
+              INNER JOIN canonical_per_article ck ON ck.search_id = d.search_id
+              INNER JOIN anchor_seller an ON an.search_id = d.search_id
+              INNER JOIN results r ON r.search_id = d.search_id AND r.scrape_run_id = d.scrape_run_id
+              WHERE r.price IS NOT NULL AND r.price > 0/*CF*/
+                AND /*GK*/ = ck.canonical_gk
+                AND /*SK*/ = an.seller_key
               GROUP BY d.search_id, d.scrape_run_id, d.executed_at
             ),
             daily AS (
@@ -152,6 +180,7 @@ public class HotSaleRoundupService {
               a.article,
               a.brand,
               a.detail,
+              an.seller_key::text AS trend_seller,
               t.first_min::float8,
               t.last_min::float8,
               t.trend_pct::float8,
@@ -162,6 +191,7 @@ public class HotSaleRoundupService {
               t.max_dod_drop_pct::float8
             FROM trends t
             INNER JOIN articles a ON a.id = t.article_id AND a.enabled = TRUE
+            INNER JOIN anchor_seller an ON an.search_id = t.article_id
             """;
 
     private record ArticleMatch(String articleFrag, String brandFrag, String detailFrag) {
@@ -441,6 +471,7 @@ public class HotSaleRoundupService {
         m.put("w_max", row.get("w_max"));
         m.put("w_median", row.get("w_median"));
         m.put("max_dod_drop_pct", row.get("max_dod_drop_pct"));
+        m.put("trend_seller", row.get("trend_seller"));
         m.put("narrative", HotSaleNarrative.build(firstMin, lastMin, wMax, wMedian, maxDod, nPoints));
         return m;
     }
@@ -489,6 +520,7 @@ public class HotSaleRoundupService {
             m.put("w_max", null);
             m.put("w_median", null);
             m.put("max_dod_drop_pct", null);
+            m.put("trend_seller", null);
             m.put("narrative", null);
             return m;
         }
@@ -507,6 +539,7 @@ public class HotSaleRoundupService {
             m.put("w_max", null);
             m.put("w_median", null);
             m.put("max_dod_drop_pct", null);
+            m.put("trend_seller", null);
             m.put("narrative", null);
             return m;
         }
@@ -522,6 +555,7 @@ public class HotSaleRoundupService {
         m.put("w_max", t.get("w_max"));
         m.put("w_median", t.get("w_median"));
         m.put("max_dod_drop_pct", t.get("max_dod_drop_pct"));
+        m.put("trend_seller", t.get("trend_seller"));
         double firstMin = ((Number) t.get("first_min")).doubleValue();
         double lastMin = ((Number) t.get("last_min")).doubleValue();
         int nPoints = ((Number) t.get("n_points")).intValue();
