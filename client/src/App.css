@@ -509,12 +509,19 @@ button:hover {
   display: table-row-group;
 }
 
-/* Resumen PDF: cada bloque principal de tabla empieza en hoja nueva; menos cortes a mitad de sección. */
-#client-report-pdf-root .client-report__pdf-new-page {
-  break-before: page;
-  page-break-before: always;
-  break-inside: avoid;
-  page-break-inside: avoid;
+/* Resumen PDF: relleno interior para que el snapshot no recorte 1px del borde de las tarjetas. */
+#client-report-pdf-root {
+  padding: 0.5rem 0.65rem;
+  box-sizing: border-box;
+}
+
+/*
+ * Evitar que toda la tarjeta sea “indivisible”: si queda poco espacio al pie, html2pdf empuja el bloque entero
+ * y la hoja anterior queda casi en blanco. Las filas (tr) y .table-wrap siguen protegidas arriba.
+ */
+#client-report-pdf-root .card.block {
+  break-inside: auto;
+  page-break-inside: auto;
 }
 
 #client-report-pdf-root .client-report__disclaimer--pdf {

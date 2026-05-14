@@ -101,23 +101,24 @@ export function ClientReportPage() {
       await html2pdf()
         .set(
           asHtml2PdfOptions({
-            margin: [10, 10, 10, 10],
+            /* Un poco más de aire que 10 mm: html2canvas recorta al borde del nodo y los bordes de tarjeta se veían pegados. */
+            margin: [13, 13, 13, 13],
             filename: `CompraVerificada_resumen_${articleId}_${sanitizeFilenamePart(a.article)}.pdf`,
             image: { type: "jpeg", quality: 0.92 },
-            html2canvas: { scale: 2, useCORS: true, logging: false },
+            html2canvas: {
+              scale: 2,
+              useCORS: true,
+              logging: false,
+              scrollX: 0,
+              scrollY: -window.scrollY,
+              windowWidth: document.documentElement.scrollWidth,
+            },
             jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
-            /* mode [] partía el canvas ciego (cortes sobre tablas). css+legacy + break-inside en .report-pdf-root
-               alinea saltos; tr queda entero y el encabezado no se parte. */
+            /* Sin `before: [...]`: los saltos forzados por sección vaciaban hojas enteras.
+               css+legacy + break-inside / avoid en tablas mantiene filas íntegras. */
             pagebreak: {
               mode: ["css", "legacy"],
-              before: [".client-report__pdf-new-page"],
-              avoid: [
-                ".table-wrap",
-                ".table",
-                "tr",
-                ".card.block",
-                ".client-report__rec",
-              ],
+              avoid: [".table-wrap", ".table", "tr", ".client-report__rec"],
             },
           }),
         )
@@ -237,7 +238,7 @@ export function ClientReportPage() {
           </section>
         ) : null}
 
-        <section className="card block client-report__pdf-new-page">
+        <section className="card block">
           <h3>Precios de otras marcas (referencia)</h3>
           <p className="muted small" style={{ marginBottom: "0.75rem" }}>
             Valores públicos del mismo artículo en otras búsquedas configuradas. La fila resaltada es la tuya.
@@ -279,7 +280,7 @@ export function ClientReportPage() {
           </div>
         </section>
 
-        <section className="card block client-report__pdf-new-page">
+        <section className="card block">
           <h3>Cómo se movieron los precios</h3>
           <p className="muted small" style={{ marginBottom: "0.75rem" }}>
             Mínimo y promedio relevados en cada actualización (solo publicaciones equivalentes al alcance
