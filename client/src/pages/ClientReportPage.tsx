@@ -106,7 +106,19 @@ export function ClientReportPage() {
             image: { type: "jpeg", quality: 0.92 },
             html2canvas: { scale: 2, useCORS: true, logging: false },
             jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
-            pagebreak: { mode: [] },
+            /* mode [] partía el canvas ciego (cortes sobre tablas). css+legacy + break-inside en .report-pdf-root
+               alinea saltos; tr queda entero y el encabezado no se parte. */
+            pagebreak: {
+              mode: ["css", "legacy"],
+              before: [".client-report__pdf-new-page"],
+              avoid: [
+                ".table-wrap",
+                ".table",
+                "tr",
+                ".card.block",
+                ".client-report__rec",
+              ],
+            },
           }),
         )
         .from(root)
@@ -216,7 +228,7 @@ export function ClientReportPage() {
           </ul>
         </section>
 
-        <p className="disclaimer client-report__disclaimer">{clientDisclaimer()}</p>
+        <p className="disclaimer client-report__disclaimer client-report__disclaimer--pdf">{clientDisclaimer()}</p>
 
         {priceStory ? (
           <section className="card block client-report__highlight">
@@ -225,7 +237,7 @@ export function ClientReportPage() {
           </section>
         ) : null}
 
-        <section className="card block">
+        <section className="card block client-report__pdf-new-page">
           <h3>Precios de otras marcas (referencia)</h3>
           <p className="muted small" style={{ marginBottom: "0.75rem" }}>
             Valores públicos del mismo artículo en otras búsquedas configuradas. La fila resaltada es la tuya.
@@ -267,12 +279,26 @@ export function ClientReportPage() {
           </div>
         </section>
 
-        <section className="card block">
+        <section className="card block client-report__pdf-new-page">
           <h3>Cómo se movieron los precios</h3>
           <p className="muted small" style={{ marginBottom: "0.75rem" }}>
             Mínimo y promedio relevados en cada actualización (solo publicaciones equivalentes al alcance
             elegido).
           </p>
+          {analyticsScope?.scopeMode === "auto" && analyticsScope.hasCanonicalProduct ? (
+            <p className="muted small" style={{ marginBottom: "0.75rem", maxWidth: "48rem" }}>
+              <strong>¿Faltan fechas que sí ves en Resultados?</strong> Con alcance automático solo
+              entran publicaciones equivalentes al producto de referencia
+              {analyticsScope.displayTitle && !analyticsScope.displayTitle.trim().toLowerCase().startsWith("cluster:")
+                ? ` («${analyticsScope.displayTitle}»)`
+                : ""}
+              . Por día calendario se usa <strong>una</strong> actualización (la última de ese día con datos).
+              Si en Resultados aparece otra variante (modelo, color o texto de publicación distinto) que no
+              coincide con esa referencia, no entra en esta serie aunque comparta categoría y marca. Para
+              acotar a una publicación concreta, abrí este resumen desde el enlace de esa fila en{" "}
+              <Link to="/resultados">Resultados</Link>.
+            </p>
+          ) : null}
           <div className="table-wrap">
             <table className="table">
               <thead>

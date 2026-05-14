@@ -475,6 +475,58 @@ button:hover {
   background: var(--surface);
 }
 
+/*
+ * html2pdf.js (Resumen): activar pagebreak mode css+legacy en ClientReportPage.
+ * Sin plugin, el lienzo se parte por altura fija y las tablas quedan cortadas.
+ * break-inside: avoid en filas / bloques lo detecta el modo "css" e inserta
+ * relleno para empujar el bloque a la página siguiente.
+ */
+.report-pdf-root .card.block {
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+.report-pdf-root .table-wrap {
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+.report-pdf-root .table {
+  border-collapse: collapse;
+}
+
+.report-pdf-root thead tr,
+.report-pdf-root tbody tr {
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+.report-pdf-root thead {
+  display: table-header-group;
+}
+
+.report-pdf-root tbody {
+  display: table-row-group;
+}
+
+/* Resumen PDF: cada bloque principal de tabla empieza en hoja nueva; menos cortes a mitad de sección. */
+#client-report-pdf-root .client-report__pdf-new-page {
+  break-before: page;
+  page-break-before: always;
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+#client-report-pdf-root .client-report__disclaimer--pdf {
+  break-after: avoid;
+  page-break-after: avoid;
+}
+
+#client-report-pdf-root .client-report__rec {
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
 .report-header__brand {
   display: flex;
   align-items: flex-start;

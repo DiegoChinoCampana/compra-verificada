@@ -30,6 +30,11 @@ export function clientDisclaimer(): string {
   return "Información orientativa a partir de publicaciones en línea; no reemplaza asesoramiento profesional ni garantiza precio, stock ni condiciones finales de compra.";
 }
 
+function isTechnicalScopeTitle(displayTitle: string | null | undefined): boolean {
+  const t = displayTitle?.trim().toLowerCase() ?? "";
+  return t.startsWith("cluster:");
+}
+
 /** Texto breve para el encabezado según alcance (sin jerga de clustering). */
 export function clientScopeSubtitle(a: {
   scopeMode?: "auto" | "manual" | "key";
@@ -46,11 +51,14 @@ export function clientScopeSubtitle(a: {
       ? `Comparación acotada a publicaciones equivalentes a «${a.displayTitle}» y tienda «${s}».`
       : `Comparación acotada a publicaciones equivalentes a «${a.displayTitle}».`;
   }
-  if (a.hasCanonicalProduct && a.displayTitle) {
-    return `Comparamos publicaciones del mismo tipo de producto (referencia: «${a.displayTitle}»).`;
-  }
   if (a.hasCanonicalProduct === false) {
     return "Incluimos todas las publicaciones con precio disponible en los relevamientos.";
+  }
+  if (a.hasCanonicalProduct && a.displayTitle?.trim() && !isTechnicalScopeTitle(a.displayTitle)) {
+    return `Comparamos publicaciones del mismo tipo de producto (referencia: «${a.displayTitle.trim()}»).`;
+  }
+  if (a.hasCanonicalProduct) {
+    return "Comparamos publicaciones del mismo tipo de producto (referencia automática).";
   }
   return null;
 }
