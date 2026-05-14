@@ -1,4 +1,4 @@
-/** Umbrales heurísticos — copiados en HotSaleRoundupController.java si usás Spring. */
+/** Umbrales heurísticos — copiados en HotSaleRoundupService.java si usás Spring. */
 const PCT_INFLATE_VS_LAST = 0.05;
 const PCT_INFLATE_VS_FIRST = 0.03;
 const PCT_BELOW_MEDIAN = 0.02;

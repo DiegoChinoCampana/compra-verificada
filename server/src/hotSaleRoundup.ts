@@ -1,6 +1,10 @@
 import { pool } from "./db.js";
 import { loadHotSaleVotedSlots, type HotSaleVotedSlot } from "./config/hotSaleVoted.js";
 import { buildHotSaleNarrative, type HotSaleNarrative } from "./hotSaleNarrative.js";
+import {
+  sqlProductGroupingKey,
+  sqlWhereRespectClusterWhenPresent,
+} from "./sql/articleSameProductTitle.js";
 
 const ALLOWED_DAYS = new Set([10, 30, 60]);
 
@@ -70,11 +74,43 @@ runs_one_per_day AS (
     AND sr.executed_at >= NOW() - (p.days_window * interval '1 day')
   ORDER BY r.search_id, date_trunc('day', sr.executed_at), sr.executed_at DESC
 ),
-run_mins AS (
-  SELECT d.search_id, d.scrape_run_id, d.executed_at, MIN(r.price)::float8 AS min_price
+run_cheapest_key AS (
+  SELECT DISTINCT ON (d.search_id, d.scrape_run_id)
+    d.search_id,
+    d.scrape_run_id,
+    d.executed_at,
+    ${sqlProductGroupingKey("r")} AS gk
   FROM runs_one_per_day d
   INNER JOIN results r ON r.search_id = d.search_id AND r.scrape_run_id = d.scrape_run_id
   WHERE r.price IS NOT NULL AND r.price > 0
+    AND ${sqlWhereRespectClusterWhenPresent("r")}
+    AND length(trim(${sqlProductGroupingKey("r")})) > 0
+  ORDER BY d.search_id, d.scrape_run_id, r.price ASC NULLS LAST, r.id ASC
+),
+canonical_per_article AS (
+  SELECT search_id, canonical_gk
+  FROM (
+    SELECT search_id, gk AS canonical_gk,
+      ROW_NUMBER() OVER (
+        PARTITION BY search_id
+        ORDER BY win_cnt DESC, win_last DESC
+      ) AS rn
+    FROM (
+      SELECT search_id, gk, COUNT(*)::int AS win_cnt, MAX(executed_at) AS win_last
+      FROM run_cheapest_key
+      GROUP BY search_id, gk
+    ) tallies
+  ) z
+  WHERE rn = 1
+),
+run_mins AS (
+  SELECT d.search_id, d.scrape_run_id, d.executed_at, MIN(r.price)::float8 AS min_price
+  FROM runs_one_per_day d
+  INNER JOIN canonical_per_article ck ON ck.search_id = d.search_id
+  INNER JOIN results r ON r.search_id = d.search_id AND r.scrape_run_id = d.scrape_run_id
+  WHERE r.price IS NOT NULL AND r.price > 0
+    AND ${sqlWhereRespectClusterWhenPresent("r")}
+    AND ${sqlProductGroupingKey("r")} = ck.canonical_gk
   GROUP BY d.search_id, d.scrape_run_id, d.executed_at
 ),
 daily AS (

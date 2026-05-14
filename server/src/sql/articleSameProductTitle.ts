@@ -6,6 +6,15 @@ export function sqlNormTitle(alias: string): string {
 }
 
 /**
+ * Normaliza tienda/vendedor (`results.seller`) como el título. Vacío o solo espacios → literal
+ * `(sin tienda)` para poder particionar series día a día sin mezclar tiendas distintas.
+ */
+export function sqlNormSeller(alias: string): string {
+  const collapsed = `trim(both from regexp_replace(lower(coalesce(${alias}.seller, '')), E'\\\\s+', ' ', 'g'))`;
+  return `COALESCE(NULLIF(${collapsed}, ''), '(sin tienda)')`;
+}
+
+/**
  * Clave de agrupación estable: `product_key` del batch semántico si existe; si no, título normalizado
  * (mismo criterio que antes).
  */
@@ -17,6 +26,23 @@ export function sqlProductGroupingKey(alias: string): string {
 /** Filtro exacto por `product_key` (batch clustering). `keyIdx` = placeholder $ en la consulta. */
 export function sqlWhereProductKey(alias: string, keyIdx: number): string {
   return `(trim(coalesce(${alias}.product_key, '')) = trim($${keyIdx}::text))`;
+}
+
+/**
+ * Si en la misma corrida del artículo existe al menos un listado con `product_key`, ignora filas sin
+ * clave al armar mínimos / canónico / peers (evita mezclar un cluster con outliers sin embed).
+ */
+export function sqlWhereRespectClusterWhenPresent(alias: string): string {
+  return `(
+    NOT EXISTS (
+      SELECT 1 FROM results r_ck
+      WHERE r_ck.search_id = ${alias}.search_id
+        AND r_ck.scrape_run_id = ${alias}.scrape_run_id
+        AND r_ck.price IS NOT NULL
+        AND NULLIF(trim(r_ck.product_key), '') IS NOT NULL
+    )
+    OR NULLIF(trim(${alias}.product_key), '') IS NOT NULL
+  )`;
 }
 
 /**
@@ -39,6 +65,7 @@ per_run_price_rank AS (
   INNER JOIN scrape_runs sr ON sr.id = r.scrape_run_id
   INNER JOIN runs_one_per_day d ON d.scrape_run_id = sr.id
   WHERE r.search_id = $1 AND r.price IS NOT NULL
+    AND ${sqlWhereRespectClusterWhenPresent("r")}
 ),
 canonical_norm_title AS (
   SELECT

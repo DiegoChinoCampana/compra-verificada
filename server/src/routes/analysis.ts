@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { pool } from "../db.js";
-import { sqlProductGroupingKey } from "../sql/articleSameProductTitle.js";
+import { sqlNormSeller, sqlProductGroupingKey, sqlWhereRespectClusterWhenPresent } from "../sql/articleSameProductTitle.js";
 
 export const analysisRouter = Router();
 
@@ -8,13 +8,18 @@ const ALLOWED_DAYS = new Set([10, 30, 60]);
 
 /** Agrupa series / saltos: COALESCE(product_key, título normalizado). */
 const groupKeyExpr = sqlProductGroupingKey("r");
+const sellerKeyExpr = sqlNormSeller("r");
+
+/** Clave compuesta producto+tienda al cruzar filas con puntos diarios (TAB no aparece en claves ni nombres de tienda). */
+const SERIES_PAIR_SEP = "\t";
 
 /**
  * Por nombre de artículo (fichas habilitadas que lo contienen en `articles.article`):
  * agrupa resultados por **product_key** (clustering) si existe; si no, por título de publicación
- * normalizado (mismo criterio que tablero / informe con `productTitle`).
- * Por cada clave: mínimo precio por día (una corrida por día y ficha, la más reciente),
- * métricas de estabilidad y enlace vía `primary_article_id` + etiqueta (`product_key` o título ML).
+ * normalizado (mismo criterio que tablero / informe con `productTitle`), y por **tienda**
+ * (`results.seller` normalizado) para no mezclar precios entre vendedores en la misma clave.
+ * Por cada clave de producto y **tienda** (`seller` normalizado): mínimo precio por día (una corrida por día y ficha,
+ * la más reciente), métricas de estabilidad y enlace vía `primary_article_id` + etiqueta (`product_key` o título ML).
  */
 analysisRouter.get("/price-stability-by-name", async (req, res) => {
   const name = typeof req.query.name === "string" ? req.query.name.trim() : "";
@@ -54,6 +59,7 @@ analysisRouter.get("/price-stability-by-name", async (req, res) => {
     result_rows AS (
       SELECT
         ${groupKeyExpr} AS title_key,
+        ${sellerKeyExpr} AS seller_key,
         r.title AS title_raw,
         r.product_key AS result_product_key,
         r.search_id,
@@ -65,18 +71,21 @@ analysisRouter.get("/price-stability-by-name", async (req, res) => {
       WHERE r.price > 0
         AND length(trim(coalesce(r.title, ''))) > 0
         AND date_trunc('day', sr.executed_at)::date = x.d
+        AND ${sqlWhereRespectClusterWhenPresent("r")}
     ),
     daily AS (
       SELECT
         title_key,
+        seller_key,
         date_trunc('day', executed_at)::date AS d,
         MIN(price)::float8 AS day_min
       FROM result_rows
-      GROUP BY title_key, date_trunc('day', executed_at)::date
+      GROUP BY title_key, seller_key, date_trunc('day', executed_at)::date
     ),
     stats AS (
       SELECT
         title_key,
+        seller_key,
         COUNT(*)::int AS n_days,
         MIN(day_min)::float8 AS min_daily_in_period,
         MAX(day_min)::float8 AS max_daily_in_period,
@@ -85,12 +94,13 @@ analysisRouter.get("/price-stability-by-name", async (req, res) => {
         (array_agg(day_min ORDER BY d ASC))[1]::float8 AS first_day_min,
         (array_agg(day_min ORDER BY d DESC))[1]::float8 AS last_day_min
       FROM daily
-      GROUP BY title_key
+      GROUP BY title_key, seller_key
       HAVING COUNT(*) >= 2
     ),
     product_title AS (
       SELECT
         title_key,
+        seller_key,
         CASE
           WHEN trim(max(coalesce(rr.result_product_key, ''))) <> ''
           THEN trim(max(rr.result_product_key))
@@ -98,16 +108,17 @@ analysisRouter.get("/price-stability-by-name", async (req, res) => {
         END AS product_title,
         (array_agg(rr.title_raw ORDER BY rr.executed_at DESC, rr.search_id))[1]::text AS sample_listing_title
       FROM result_rows rr
-      GROUP BY title_key
+      GROUP BY title_key, seller_key
     ),
     title_meta AS (
       SELECT
         rr.title_key,
+        rr.seller_key,
         COUNT(DISTINCT rr.search_id)::int AS n_articles,
         MIN(rr.search_id)::int AS primary_article_id
       FROM result_rows rr
-      INNER JOIN stats s ON s.title_key = rr.title_key
-      GROUP BY rr.title_key
+      INNER JOIN stats s ON s.title_key = rr.title_key AND s.seller_key = rr.seller_key
+      GROUP BY rr.title_key, rr.seller_key
     ),
     ranked AS (
       SELECT
@@ -116,6 +127,7 @@ analysisRouter.get("/price-stability-by-name", async (req, res) => {
         tm.n_articles,
         tm.primary_article_id,
         s.title_key,
+        s.seller_key,
         s.n_days,
         s.first_day_min,
         s.last_day_min,
@@ -135,8 +147,8 @@ analysisRouter.get("/price-stability-by-name", async (req, res) => {
           ELSE NULL
         END AS cv_daily_mins
       FROM stats s
-      INNER JOIN title_meta tm ON tm.title_key = s.title_key
-      INNER JOIN product_title pt ON pt.title_key = s.title_key
+      INNER JOIN title_meta tm ON tm.title_key = s.title_key AND tm.seller_key = s.seller_key
+      INNER JOIN product_title pt ON pt.title_key = s.title_key AND pt.seller_key = s.seller_key
     ),
     numbered AS (
       SELECT
@@ -146,13 +158,15 @@ analysisRouter.get("/price-stability-by-name", async (req, res) => {
             ABS(rnk.trend_pct) ASC,
             rnk.trend_pct ASC,
             COALESCE(rnk.range_pct, 999)::float8 ASC,
-            rnk.product_title ASC
+            rnk.product_title ASC,
+            rnk.seller_key ASC
         )::int AS series_id,
         rnk.product_title,
         rnk.sample_listing_title,
         rnk.n_articles,
         rnk.primary_article_id,
         rnk.title_key,
+        rnk.seller_key,
         rnk.n_days,
         rnk.first_day_min,
         rnk.last_day_min,
@@ -173,7 +187,8 @@ analysisRouter.get("/price-stability-by-name", async (req, res) => {
       trend_pct,
       range_pct,
       cv_daily_mins,
-      title_key AS group_key
+      title_key AS group_key,
+      seller_key AS seller
     FROM numbered
     LIMIT 120
   `;
@@ -182,6 +197,7 @@ analysisRouter.get("/price-stability-by-name", async (req, res) => {
     series_id: number;
     product_title: string;
     sample_listing_title: string;
+    seller: string;
     n_articles: number;
     primary_article_id: number;
     n_days: number;
@@ -193,7 +209,7 @@ analysisRouter.get("/price-stability-by-name", async (req, res) => {
     group_key: string;
   }>(sql, [name, days]);
 
-  const titleKeys = rawRows.map((r) => r.group_key);
+  const compositeKeys = rawRows.map((r) => `${r.group_key}${SERIES_PAIR_SEP}${r.seller}`);
 
   let daily_by_series: {
     series_id: number;
@@ -202,7 +218,7 @@ analysisRouter.get("/price-stability-by-name", async (req, res) => {
     points: { day: string; min_price: number }[];
   }[] = [];
 
-  if (titleKeys.length > 0) {
+  if (compositeKeys.length > 0) {
     const dailySql = `
       WITH params AS (
         SELECT $1::text AS raw_name, $2::int AS days_window
@@ -231,6 +247,7 @@ analysisRouter.get("/price-stability-by-name", async (req, res) => {
       result_rows AS (
         SELECT
           ${groupKeyExpr} AS title_key,
+          ${sellerKeyExpr} AS seller_key,
           r.title AS title_raw,
           r.product_key AS result_product_key,
           r.search_id,
@@ -239,42 +256,46 @@ analysisRouter.get("/price-stability-by-name", async (req, res) => {
         FROM runs_per_day x
         INNER JOIN results r ON r.search_id = x.search_id AND r.scrape_run_id = x.scrape_run_id
         INNER JOIN scrape_runs sr ON sr.id = r.scrape_run_id
-        WHERE r.price > 0
-          AND length(trim(coalesce(r.title, ''))) > 0
-          AND date_trunc('day', sr.executed_at)::date = x.d
-      ),
+      WHERE r.price > 0
+        AND length(trim(coalesce(r.title, ''))) > 0
+        AND date_trunc('day', sr.executed_at)::date = x.d
+        AND ${sqlWhereRespectClusterWhenPresent("r")}
+    ),
       daily AS (
         SELECT
           title_key,
+          seller_key,
           date_trunc('day', executed_at)::date AS d,
           MIN(price)::float8 AS day_min
         FROM result_rows
-        GROUP BY title_key, date_trunc('day', executed_at)::date
+        GROUP BY title_key, seller_key, date_trunc('day', executed_at)::date
       )
-      SELECT title_key, to_char(d, 'YYYY-MM-DD') AS day, day_min AS min_price
+      SELECT title_key, seller_key AS seller, to_char(d, 'YYYY-MM-DD') AS day, day_min AS min_price
       FROM daily
-      WHERE title_key = ANY($3::text[])
-      ORDER BY title_key, d
+      WHERE (title_key || chr(9) || seller_key) = ANY($3::text[])
+      ORDER BY title_key, seller_key, d
     `;
 
     const { rows: dailyRows } = await pool.query<{
       title_key: string;
+      seller: string;
       day: string;
       min_price: string | number;
-    }>(dailySql, [name, days, titleKeys]);
+    }>(dailySql, [name, days, compositeKeys]);
 
     const byKey = new Map<string, { day: string; min_price: number }[]>();
     for (const row of dailyRows) {
       const price = typeof row.min_price === "string" ? parseFloat(row.min_price) : row.min_price;
-      if (!byKey.has(row.title_key)) byKey.set(row.title_key, []);
-      byKey.get(row.title_key)!.push({ day: row.day, min_price: price });
+      const k = `${row.title_key}${SERIES_PAIR_SEP}${row.seller}`;
+      if (!byKey.has(k)) byKey.set(k, []);
+      byKey.get(k)!.push({ day: row.day, min_price: price });
     }
 
     daily_by_series = rawRows.map((r) => ({
       series_id: r.series_id,
       product_title: r.product_title,
       sample_listing_title: r.sample_listing_title,
-      points: byKey.get(r.group_key) ?? [],
+      points: byKey.get(`${r.group_key}${SERIES_PAIR_SEP}${r.seller}`) ?? [],
     }));
   }
 
@@ -334,6 +355,7 @@ analysisRouter.get("/peer-gap-by-name", async (req, res) => {
       FROM latest_run lr
       INNER JOIN results r ON r.scrape_run_id = lr.run_id AND r.search_id = lr.article_id
       WHERE r.price IS NOT NULL AND r.price > 0
+        AND ${sqlWhereRespectClusterWhenPresent("r")}
       ORDER BY lr.article_id, r.price ASC NULLS LAST, r.id ASC
     ),
     latest_run_price AS (
@@ -343,6 +365,7 @@ analysisRouter.get("/peer-gap-by-name", async (req, res) => {
       INNER JOIN results r ON r.scrape_run_id = lr.run_id AND r.search_id = lr.article_id
       WHERE r.price IS NOT NULL
         AND r.price > 0
+        AND ${sqlWhereRespectClusterWhenPresent("r")}
         AND ${sqlProductGroupingKey("r")} = rp.ref_group_key
       GROUP BY rp.article_id, rp.ref_group_key
     ),
@@ -403,8 +426,9 @@ analysisRouter.get("/peer-gap-by-name", async (req, res) => {
 });
 
 /**
- * Saltos de precio entre días consecutivos con dato (mismo criterio de título normalizado y corrida
- * por día que estabilidad). Solo filas cuyo mayor salto relativo día a día >= umbral.
+ * Saltos de precio entre días consecutivos con dato (misma clave de producto **y misma tienda**
+ * (`seller` normalizado), misma regla de corrida por día que estabilidad). Solo filas cuyo mayor
+ * salto relativo día a día >= umbral.
  */
 analysisRouter.get("/price-jumps-by-name", async (req, res) => {
   const name = typeof req.query.name === "string" ? req.query.name.trim() : "";
@@ -446,6 +470,7 @@ analysisRouter.get("/price-jumps-by-name", async (req, res) => {
     result_rows AS (
       SELECT
         ${groupKeyExpr} AS title_key,
+        ${sellerKeyExpr} AS seller_key,
         r.title AS title_raw,
         r.product_key AS result_product_key,
         r.search_id,
@@ -457,27 +482,31 @@ analysisRouter.get("/price-jumps-by-name", async (req, res) => {
       WHERE r.price > 0
         AND length(trim(coalesce(r.title, ''))) > 0
         AND date_trunc('day', sr.executed_at)::date = x.d
+        AND ${sqlWhereRespectClusterWhenPresent("r")}
     ),
     daily AS (
       SELECT
         title_key,
+        seller_key,
         date_trunc('day', executed_at)::date AS d,
         MIN(price)::float8 AS day_min
       FROM result_rows
-      GROUP BY title_key, date_trunc('day', executed_at)::date
+      GROUP BY title_key, seller_key, date_trunc('day', executed_at)::date
     ),
     ordered AS (
       SELECT
         title_key,
+        seller_key,
         d,
         day_min,
-        LAG(day_min) OVER (PARTITION BY title_key ORDER BY d) AS prev_min,
-        LAG(d) OVER (PARTITION BY title_key ORDER BY d) AS prev_d
+        LAG(day_min) OVER (PARTITION BY title_key, seller_key ORDER BY d) AS prev_min,
+        LAG(d) OVER (PARTITION BY title_key, seller_key ORDER BY d) AS prev_d
       FROM daily
     ),
     jump_row AS (
       SELECT
         title_key,
+        seller_key,
         d AS day_end,
         prev_d AS day_start,
         CASE
@@ -489,24 +518,26 @@ analysisRouter.get("/price-jumps-by-name", async (req, res) => {
       WHERE prev_min IS NOT NULL
     ),
     by_title AS (
-      SELECT title_key, MAX(jump_pct)::float8 AS max_jump_pct
+      SELECT title_key, seller_key, MAX(jump_pct)::float8 AS max_jump_pct
       FROM jump_row
-      GROUP BY title_key
+      GROUP BY title_key, seller_key
       HAVING MAX(jump_pct) >= (SELECT thr FROM params)
     ),
     worst_pair AS (
-      SELECT DISTINCT ON (jr.title_key)
+      SELECT DISTINCT ON (jr.title_key, jr.seller_key)
         jr.title_key,
+        jr.seller_key,
         jr.day_start,
         jr.day_end,
         jr.jump_pct AS worst_jump_pct
       FROM jump_row jr
-      INNER JOIN by_title b ON b.title_key = jr.title_key
-      ORDER BY jr.title_key, jr.jump_pct DESC NULLS LAST, jr.day_end DESC
+      INNER JOIN by_title b ON b.title_key = jr.title_key AND b.seller_key = jr.seller_key
+      ORDER BY jr.title_key, jr.seller_key, jr.jump_pct DESC NULLS LAST, jr.day_end DESC
     ),
     product_pick AS (
       SELECT
         title_key,
+        seller_key,
         CASE
           WHEN trim(max(coalesce(rr.result_product_key, ''))) <> ''
           THEN trim(max(rr.result_product_key))
@@ -514,12 +545,16 @@ analysisRouter.get("/price-jumps-by-name", async (req, res) => {
         END AS product_title,
         (array_agg(rr.title_raw ORDER BY rr.executed_at DESC, rr.search_id))[1]::text AS sample_listing_title
       FROM result_rows rr
-      GROUP BY title_key
+      GROUP BY title_key, seller_key
     ),
     title_meta AS (
-      SELECT rr.title_key, COUNT(DISTINCT rr.search_id)::int AS n_articles, MIN(rr.search_id)::int AS primary_article_id
+      SELECT
+        rr.title_key,
+        rr.seller_key,
+        COUNT(DISTINCT rr.search_id)::int AS n_articles,
+        MIN(rr.search_id)::int AS primary_article_id
       FROM result_rows rr
-      GROUP BY rr.title_key
+      GROUP BY rr.title_key, rr.seller_key
     )
     SELECT
       pp.product_title,
@@ -527,14 +562,15 @@ analysisRouter.get("/price-jumps-by-name", async (req, res) => {
       tm.n_articles,
       tm.primary_article_id,
       b.title_key AS group_key,
+      b.seller_key AS seller,
       to_char(wp.day_start, 'YYYY-MM-DD') AS day_from,
       to_char(wp.day_end, 'YYYY-MM-DD') AS day_to,
       wp.worst_jump_pct AS max_jump_pct
     FROM by_title b
-    INNER JOIN worst_pair wp ON wp.title_key = b.title_key
-    INNER JOIN product_pick pp ON pp.title_key = b.title_key
-    INNER JOIN title_meta tm ON tm.title_key = b.title_key
-    ORDER BY b.max_jump_pct DESC, pp.product_title ASC
+    INNER JOIN worst_pair wp ON wp.title_key = b.title_key AND wp.seller_key = b.seller_key
+    INNER JOIN product_pick pp ON pp.title_key = b.title_key AND pp.seller_key = b.seller_key
+    INNER JOIN title_meta tm ON tm.title_key = b.title_key AND tm.seller_key = b.seller_key
+    ORDER BY b.max_jump_pct DESC, pp.product_title ASC, b.seller_key ASC
     LIMIT 120
   `;
 

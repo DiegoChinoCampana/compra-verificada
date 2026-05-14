@@ -5,8 +5,8 @@
 ## (`api.war`, en `WEB-INF/classes/application.yml`). NO se leen variables
 ## de entorno ni `setenv.sh` / `setenv.bat`.
 ##
-## ⚠ Contiene secretos en texto plano (password de DB y API key de OpenAI).
-## Asumido y aceptado por configuración explícita.
+## ⚠ La base puede llevar password en este archivo en deploy privado; la API key de OpenAI
+## debe definirse con variable de entorno `OPENAI_API_KEY` (no commitear claves).
 ##
 ## DB target: localhost:5432 / compra_verificada (user cv_app).
 ## Si Postgres está en otro host, cambiá la URL más abajo y rebuildeá el WAR.
@@ -64,10 +64,9 @@ cv:
     batch-secret: ""
 
   openai:
-    # API key de OpenAI. Reemplazá el placeholder por tu key real ANTES de buildear el WAR
-    # (mismo valor que `OPENAI_API_KEY` en `server/.env`). Si lo dejás en placeholder,
-    # los GET siguen funcionando; solo el POST /api/analytics/operational/product-clustering-run falla.
-    api-key: "REEMPLAZAR_CON_OPENAI_API_KEY"
+    # Definir en el Tomcat / sistema: OPENAI_API_KEY (mismo valor que en server/.env).
+    # Vacío: GET ok; falla el POST de clustering hasta que haya key.
+    api-key: ${OPENAI_API_KEY:}
     project-id: "proj_0FibL5ewgzT1mEpJgrZz4Vll"
     base-url: "https://api.openai.com/v1"
     embedding-model: text-embedding-3-small

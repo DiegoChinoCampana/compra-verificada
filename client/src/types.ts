@@ -163,7 +163,7 @@ export type ScrapedResultsPagePayload = {
   rows: ScrapedResultListRow[];
 };
 
-/** Fila de /api/analysis/price-stability-by-name (agrupa por `product_key` o título normalizado). */
+/** Fila de /api/analysis/price-stability-by-name (agrupa por `product_key` o título normalizado + tienda). */
 export type PriceStabilityRow = {
   series_id: number;
   product_title: string;
@@ -171,6 +171,8 @@ export type PriceStabilityRow = {
   sample_listing_title: string;
   /** Misma clave de agrupación que en servidor (`sqlProductGroupingKey`). */
   group_key: string;
+  /** Tienda/vendedor normalizado (`results.seller`); sin dato → "(sin tienda)". */
+  seller: string;
   n_articles: number;
   primary_article_id: number;
   n_days: number;
@@ -227,6 +229,8 @@ export type PriceJumpRow = {
   product_title: string;
   sample_listing_title: string;
   group_key: string;
+  /** Tienda/vendedor normalizado; la serie del salto es por producto + esta tienda. */
+  seller: string;
   n_articles: number;
   primary_article_id: number;
   day_from: string;

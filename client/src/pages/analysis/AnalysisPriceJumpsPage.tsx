@@ -84,7 +84,8 @@ export function AnalysisPriceJumpsPage() {
       <p className="muted small">
         Te muestra publicaciones agrupadas por la <strong>misma clave de producto</strong> que en el tablero
         (<code>product_key</code> del clustering cuando existe; si no, título de listado normalizado),
-        donde el precio más bajo del día “pegó un salto” fuerte respecto al día anterior con dato. Sirve
+        donde el precio más bajo del día “pegó un salto” fuerte respecto al día anterior con dato,{" "}
+        <strong>siempre dentro de la misma tienda</strong> (<code>results.seller</code> normalizado). Sirve
         para detectar ofertas flash, errores de scrape, cambios de vendedor o listados que se movieron
         mucho en poco tiempo, y entrar a la ficha o al informe con un clic.
       </p>
@@ -114,9 +115,9 @@ export function AnalysisPriceJumpsPage() {
             tablero). Sin título no entra.
           </li>
           <li>
-            <strong>Mínimo diario por clave:</strong> por cada día con datos, el mínimo de{" "}
-            <code>price</code> entre todas las publicaciones de esa misma clave (todas las fichas
-            candidatas).
+            <strong>Mínimo diario por clave y tienda:</strong> por cada día con datos, el mínimo de{" "}
+            <code>price</code> entre las publicaciones de esa misma clave <strong>y ese vendedor/tienda</strong>{" "}
+            (todas las fichas candidatas).
           </li>
           <li>
             <strong>Salto entre días consecutivos con dato:</strong> ordenados por fecha, para cada par de
@@ -180,8 +181,8 @@ export function AnalysisPriceJumpsPage() {
       {!loading && data && (
         <>
           <p className="muted small" style={{ margin: "0.75rem 0" }}>
-            «{data.name}» · {data.days} días · umbral {data.threshold_pct} % · {data.count} productos con
-            salto máximo ≥ umbral (tope 120 filas).
+            «{data.name}» · {data.days} días · umbral {data.threshold_pct} % · {data.count} series (producto +
+            tienda) con salto máximo ≥ umbral (tope 120 filas).
           </p>
           {data.rows.length === 0 ? (
             <p className="muted">
@@ -193,6 +194,7 @@ export function AnalysisPriceJumpsPage() {
               <table className="table table--dense">
                 <thead>
                   <tr>
+                    <th>Tienda</th>
                     <th title="Con clustering: product_key y título ML; sin clustering: título normalizado.">
                       Producto
                     </th>
@@ -205,10 +207,11 @@ export function AnalysisPriceJumpsPage() {
                 </thead>
                 <tbody>
                   {data.rows.map((r) => {
-                    const scope = productScopeFromGroupKey(r.group_key);
+                    const scope = productScopeFromGroupKey(r.group_key, r.seller);
                     const base = `/articulos/${r.primary_article_id}`;
                     return (
-                      <tr key={`${r.group_key}-${r.day_from}-${r.day_to}`}>
+                      <tr key={`${r.group_key}-${r.seller}-${r.day_from}-${r.day_to}`}>
+                        <td className="muted small">{r.seller}</td>
                         <td>
                           <AnalysisProductCell
                             row={{

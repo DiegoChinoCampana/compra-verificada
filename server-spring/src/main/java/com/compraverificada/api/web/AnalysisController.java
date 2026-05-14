@@ -29,9 +29,13 @@ public class AnalysisController {
 
     private static String gk() { return SqlSnippets.productGroupingKey("r"); }
 
+    private static String sk() { return SqlSnippets.normSeller("r"); }
+
+    private static final String STABILITY_SERIES_PAIR_SEP = "\t";
+
     /**
-     * Estabilidad por nombre: agrupa por product_key (clustering) o por título normalizado.
-     * Devuelve métricas por serie + serie diaria (mín. precio por día).
+     * Estabilidad por nombre: agrupa por product_key (clustering) o por título normalizado, y por
+     * tienda ({@code results.seller} normalizado). Devuelve métricas por serie + serie diaria.
      */
     @GetMapping("/price-stability-by-name")
     public ResponseEntity<?> priceStabilityByName(
@@ -73,6 +77,7 @@ public class AnalysisController {
             result_rows AS (
               SELECT
                 /*GK*/ AS title_key,
+                /*SK*/ AS seller_key,
                 r.title AS title_raw,
                 r.product_key AS result_product_key,
                 r.search_id,
@@ -84,18 +89,30 @@ public class AnalysisController {
               WHERE r.price > 0
                 AND length(trim(coalesce(r.title, ''))) > 0
                 AND date_trunc('day', sr.executed_at)::date = x.d
+                AND (
+                  NOT EXISTS (
+                    SELECT 1 FROM results r_ck
+                    WHERE r_ck.search_id = r.search_id
+                      AND r_ck.scrape_run_id = r.scrape_run_id
+                      AND r_ck.price IS NOT NULL
+                      AND NULLIF(trim(r_ck.product_key), '') IS NOT NULL
+                  )
+                  OR NULLIF(trim(r.product_key), '') IS NOT NULL
+                )
             ),
             daily AS (
               SELECT
                 title_key,
+                seller_key,
                 date_trunc('day', executed_at)::date AS d,
                 MIN(price)::float8 AS day_min
               FROM result_rows
-              GROUP BY title_key, date_trunc('day', executed_at)::date
+              GROUP BY title_key, seller_key, date_trunc('day', executed_at)::date
             ),
             stats AS (
               SELECT
                 title_key,
+                seller_key,
                 COUNT(*)::int AS n_days,
                 MIN(day_min)::float8 AS min_daily_in_period,
                 MAX(day_min)::float8 AS max_daily_in_period,
@@ -104,12 +121,13 @@ public class AnalysisController {
                 (array_agg(day_min ORDER BY d ASC))[1]::float8 AS first_day_min,
                 (array_agg(day_min ORDER BY d DESC))[1]::float8 AS last_day_min
               FROM daily
-              GROUP BY title_key
+              GROUP BY title_key, seller_key
               HAVING COUNT(*) >= 2
             ),
             product_title AS (
               SELECT
                 title_key,
+                seller_key,
                 CASE
                   WHEN trim(max(coalesce(rr.result_product_key, ''))) <> ''
                   THEN trim(max(rr.result_product_key))
@@ -117,16 +135,17 @@ public class AnalysisController {
                 END AS product_title,
                 (array_agg(rr.title_raw ORDER BY rr.executed_at DESC, rr.search_id))[1]::text AS sample_listing_title
               FROM result_rows rr
-              GROUP BY title_key
+              GROUP BY title_key, seller_key
             ),
             title_meta AS (
               SELECT
                 rr.title_key,
+                rr.seller_key,
                 COUNT(DISTINCT rr.search_id)::int AS n_articles,
                 MIN(rr.search_id)::int AS primary_article_id
               FROM result_rows rr
-              INNER JOIN stats s ON s.title_key = rr.title_key
-              GROUP BY rr.title_key
+              INNER JOIN stats s ON s.title_key = rr.title_key AND s.seller_key = rr.seller_key
+              GROUP BY rr.title_key, rr.seller_key
             ),
             ranked AS (
               SELECT
@@ -135,6 +154,7 @@ public class AnalysisController {
                 tm.n_articles,
                 tm.primary_article_id,
                 s.title_key,
+                s.seller_key,
                 s.n_days,
                 s.first_day_min,
                 s.last_day_min,
@@ -154,8 +174,8 @@ public class AnalysisController {
                   ELSE NULL
                 END AS cv_daily_mins
               FROM stats s
-              INNER JOIN title_meta tm ON tm.title_key = s.title_key
-              INNER JOIN product_title pt ON pt.title_key = s.title_key
+              INNER JOIN title_meta tm ON tm.title_key = s.title_key AND tm.seller_key = s.seller_key
+              INNER JOIN product_title pt ON pt.title_key = s.title_key AND pt.seller_key = s.seller_key
             ),
             numbered AS (
               SELECT
@@ -165,13 +185,15 @@ public class AnalysisController {
                     ABS(rnk.trend_pct) ASC,
                     rnk.trend_pct ASC,
                     COALESCE(rnk.range_pct, 999)::float8 ASC,
-                    rnk.product_title ASC
+                    rnk.product_title ASC,
+                    rnk.seller_key ASC
                 )::int AS series_id,
                 rnk.product_title,
                 rnk.sample_listing_title,
                 rnk.n_articles,
                 rnk.primary_article_id,
                 rnk.title_key,
+                rnk.seller_key,
                 rnk.n_days,
                 rnk.first_day_min,
                 rnk.last_day_min,
@@ -192,10 +214,11 @@ public class AnalysisController {
               trend_pct,
               range_pct,
               cv_daily_mins,
-              title_key AS group_key
+              title_key AS group_key,
+              seller_key AS seller
             FROM numbered
             LIMIT 120
-            """).replace("/*GK*/", gk());
+            """).replace("/*GK*/", gk()).replace("/*SK*/", sk());
 
         MapSqlParameterSource params = new MapSqlParameterSource()
                 .addValue("name", name)
@@ -205,10 +228,13 @@ public class AnalysisController {
 
         List<Map<String, Object>> dailyBySeries = new ArrayList<>();
         if (!rawRows.isEmpty()) {
-            List<String> titleKeys = new ArrayList<>();
+            List<String> compositeKeys = new ArrayList<>();
             for (Map<String, Object> row : rawRows) {
                 Object g = row.get("group_key");
-                if (g != null) titleKeys.add(g.toString());
+                Object s = row.get("seller");
+                if (g != null && s != null) {
+                    compositeKeys.add(g.toString() + STABILITY_SERIES_PAIR_SEP + s.toString());
+                }
             }
 
             String dailySql = ("""
@@ -239,6 +265,7 @@ public class AnalysisController {
                 result_rows AS (
                   SELECT
                     /*GK*/ AS title_key,
+                    /*SK*/ AS seller_key,
                     r.title AS title_raw,
                     r.product_key AS result_product_key,
                     r.search_id,
@@ -250,31 +277,44 @@ public class AnalysisController {
                   WHERE r.price > 0
                     AND length(trim(coalesce(r.title, ''))) > 0
                     AND date_trunc('day', sr.executed_at)::date = x.d
+                    AND (
+                      NOT EXISTS (
+                        SELECT 1 FROM results r_ck
+                        WHERE r_ck.search_id = r.search_id
+                          AND r_ck.scrape_run_id = r.scrape_run_id
+                          AND r_ck.price IS NOT NULL
+                          AND NULLIF(trim(r_ck.product_key), '') IS NOT NULL
+                      )
+                      OR NULLIF(trim(r.product_key), '') IS NOT NULL
+                    )
                 ),
                 daily AS (
                   SELECT
                     title_key,
+                    seller_key,
                     date_trunc('day', executed_at)::date AS d,
                     MIN(price)::float8 AS day_min
                   FROM result_rows
-                  GROUP BY title_key, date_trunc('day', executed_at)::date
+                  GROUP BY title_key, seller_key, date_trunc('day', executed_at)::date
                 )
-                SELECT title_key, to_char(d, 'YYYY-MM-DD') AS day, day_min AS min_price
+                SELECT title_key, seller_key AS seller, to_char(d, 'YYYY-MM-DD') AS day, day_min AS min_price
                 FROM daily
-                WHERE title_key IN (:titleKeys)
-                ORDER BY title_key, d
-                """).replace("/*GK*/", gk());
+                WHERE (title_key || chr(9) || seller_key) IN (:compositeKeys)
+                ORDER BY title_key, seller_key, d
+                """).replace("/*GK*/", gk()).replace("/*SK*/", sk());
 
             MapSqlParameterSource dParams = new MapSqlParameterSource()
                     .addValue("name", name)
                     .addValue("days", days)
-                    .addValue("titleKeys", titleKeys);
+                    .addValue("compositeKeys", compositeKeys);
 
             List<Map<String, Object>> dailyRows = jdbc.queryForList(dailySql, dParams);
 
             Map<String, List<Map<String, Object>>> byKey = new HashMap<>();
             for (Map<String, Object> row : dailyRows) {
                 String tk = row.get("title_key") == null ? "" : row.get("title_key").toString();
+                String sk = row.get("seller") == null ? "" : row.get("seller").toString();
+                String pairKey = tk + STABILITY_SERIES_PAIR_SEP + sk;
                 Object minP = row.get("min_price");
                 double price;
                 if (minP instanceof Number n) price = n.doubleValue();
@@ -282,7 +322,7 @@ public class AnalysisController {
                 Map<String, Object> point = new LinkedHashMap<>();
                 point.put("day", row.get("day"));
                 point.put("min_price", price);
-                byKey.computeIfAbsent(tk, k -> new ArrayList<>()).add(point);
+                byKey.computeIfAbsent(pairKey, k -> new ArrayList<>()).add(point);
             }
 
             for (Map<String, Object> r : rawRows) {
@@ -290,8 +330,9 @@ public class AnalysisController {
                 entry.put("series_id", r.get("series_id"));
                 entry.put("product_title", r.get("product_title"));
                 entry.put("sample_listing_title", r.get("sample_listing_title"));
-                String key = r.get("group_key") == null ? "" : r.get("group_key").toString();
-                entry.put("points", byKey.getOrDefault(key, List.of()));
+                String gk = r.get("group_key") == null ? "" : r.get("group_key").toString();
+                String seller = r.get("seller") == null ? "" : r.get("seller").toString();
+                entry.put("points", byKey.getOrDefault(gk + STABILITY_SERIES_PAIR_SEP + seller, List.of()));
                 dailyBySeries.add(entry);
             }
         }
@@ -349,6 +390,16 @@ public class AnalysisController {
               FROM latest_run lr
               INNER JOIN results r ON r.scrape_run_id = lr.run_id AND r.search_id = lr.article_id
               WHERE r.price IS NOT NULL AND r.price > 0
+                AND (
+                  NOT EXISTS (
+                    SELECT 1 FROM results r_ck
+                    WHERE r_ck.search_id = lr.article_id
+                      AND r_ck.scrape_run_id = lr.run_id
+                      AND r_ck.price IS NOT NULL
+                      AND NULLIF(trim(r_ck.product_key), '') IS NOT NULL
+                  )
+                  OR NULLIF(trim(r.product_key), '') IS NOT NULL
+                )
               ORDER BY lr.article_id, r.price ASC NULLS LAST, r.id ASC
             ),
             latest_run_price AS (
@@ -358,6 +409,16 @@ public class AnalysisController {
               INNER JOIN results r ON r.scrape_run_id = lr.run_id AND r.search_id = lr.article_id
               WHERE r.price IS NOT NULL
                 AND r.price > 0
+                AND (
+                  NOT EXISTS (
+                    SELECT 1 FROM results r_ck
+                    WHERE r_ck.search_id = r.search_id
+                      AND r_ck.scrape_run_id = r.scrape_run_id
+                      AND r_ck.price IS NOT NULL
+                      AND NULLIF(trim(r_ck.product_key), '') IS NOT NULL
+                  )
+                  OR NULLIF(trim(r.product_key), '') IS NOT NULL
+                )
                 AND /*GK*/ = rp.ref_group_key
               GROUP BY rp.article_id, rp.ref_group_key
             ),
@@ -463,6 +524,7 @@ public class AnalysisController {
             result_rows AS (
               SELECT
                 /*GK*/ AS title_key,
+                /*SK*/ AS seller_key,
                 r.title AS title_raw,
                 r.product_key AS result_product_key,
                 r.search_id,
@@ -474,27 +536,40 @@ public class AnalysisController {
               WHERE r.price > 0
                 AND length(trim(coalesce(r.title, ''))) > 0
                 AND date_trunc('day', sr.executed_at)::date = x.d
+                AND (
+                  NOT EXISTS (
+                    SELECT 1 FROM results r_ck
+                    WHERE r_ck.search_id = r.search_id
+                      AND r_ck.scrape_run_id = r.scrape_run_id
+                      AND r_ck.price IS NOT NULL
+                      AND NULLIF(trim(r_ck.product_key), '') IS NOT NULL
+                  )
+                  OR NULLIF(trim(r.product_key), '') IS NOT NULL
+                )
             ),
             daily AS (
               SELECT
                 title_key,
+                seller_key,
                 date_trunc('day', executed_at)::date AS d,
                 MIN(price)::float8 AS day_min
               FROM result_rows
-              GROUP BY title_key, date_trunc('day', executed_at)::date
+              GROUP BY title_key, seller_key, date_trunc('day', executed_at)::date
             ),
             ordered AS (
               SELECT
                 title_key,
+                seller_key,
                 d,
                 day_min,
-                LAG(day_min) OVER (PARTITION BY title_key ORDER BY d) AS prev_min,
-                LAG(d) OVER (PARTITION BY title_key ORDER BY d) AS prev_d
+                LAG(day_min) OVER (PARTITION BY title_key, seller_key ORDER BY d) AS prev_min,
+                LAG(d) OVER (PARTITION BY title_key, seller_key ORDER BY d) AS prev_d
               FROM daily
             ),
             jump_row AS (
               SELECT
                 title_key,
+                seller_key,
                 d AS day_end,
                 prev_d AS day_start,
                 CASE
@@ -506,24 +581,26 @@ public class AnalysisController {
               WHERE prev_min IS NOT NULL
             ),
             by_title AS (
-              SELECT title_key, MAX(jump_pct)::float8 AS max_jump_pct
+              SELECT title_key, seller_key, MAX(jump_pct)::float8 AS max_jump_pct
               FROM jump_row
-              GROUP BY title_key
+              GROUP BY title_key, seller_key
               HAVING MAX(jump_pct) >= (SELECT thr FROM params)
             ),
             worst_pair AS (
-              SELECT DISTINCT ON (jr.title_key)
+              SELECT DISTINCT ON (jr.title_key, jr.seller_key)
                 jr.title_key,
+                jr.seller_key,
                 jr.day_start,
                 jr.day_end,
                 jr.jump_pct AS worst_jump_pct
               FROM jump_row jr
-              INNER JOIN by_title b ON b.title_key = jr.title_key
-              ORDER BY jr.title_key, jr.jump_pct DESC NULLS LAST, jr.day_end DESC
+              INNER JOIN by_title b ON b.title_key = jr.title_key AND b.seller_key = jr.seller_key
+              ORDER BY jr.title_key, jr.seller_key, jr.jump_pct DESC NULLS LAST, jr.day_end DESC
             ),
             product_pick AS (
               SELECT
                 title_key,
+                seller_key,
                 CASE
                   WHEN trim(max(coalesce(rr.result_product_key, ''))) <> ''
                   THEN trim(max(rr.result_product_key))
@@ -531,12 +608,16 @@ public class AnalysisController {
                 END AS product_title,
                 (array_agg(rr.title_raw ORDER BY rr.executed_at DESC, rr.search_id))[1]::text AS sample_listing_title
               FROM result_rows rr
-              GROUP BY title_key
+              GROUP BY title_key, seller_key
             ),
             title_meta AS (
-              SELECT rr.title_key, COUNT(DISTINCT rr.search_id)::int AS n_articles, MIN(rr.search_id)::int AS primary_article_id
+              SELECT
+                rr.title_key,
+                rr.seller_key,
+                COUNT(DISTINCT rr.search_id)::int AS n_articles,
+                MIN(rr.search_id)::int AS primary_article_id
               FROM result_rows rr
-              GROUP BY rr.title_key
+              GROUP BY rr.title_key, rr.seller_key
             )
             SELECT
               pp.product_title,
@@ -544,16 +625,17 @@ public class AnalysisController {
               tm.n_articles,
               tm.primary_article_id,
               b.title_key AS group_key,
+              b.seller_key AS seller,
               to_char(wp.day_start, 'YYYY-MM-DD') AS day_from,
               to_char(wp.day_end, 'YYYY-MM-DD') AS day_to,
               wp.worst_jump_pct AS max_jump_pct
             FROM by_title b
-            INNER JOIN worst_pair wp ON wp.title_key = b.title_key
-            INNER JOIN product_pick pp ON pp.title_key = b.title_key
-            INNER JOIN title_meta tm ON tm.title_key = b.title_key
-            ORDER BY b.max_jump_pct DESC, pp.product_title ASC
+            INNER JOIN worst_pair wp ON wp.title_key = b.title_key AND wp.seller_key = b.seller_key
+            INNER JOIN product_pick pp ON pp.title_key = b.title_key AND pp.seller_key = b.seller_key
+            INNER JOIN title_meta tm ON tm.title_key = b.title_key AND tm.seller_key = b.seller_key
+            ORDER BY b.max_jump_pct DESC, pp.product_title ASC, b.seller_key ASC
             LIMIT 120
-            """).replace("/*GK*/", gk());
+            """).replace("/*GK*/", gk()).replace("/*SK*/", sk());
 
         MapSqlParameterSource params = new MapSqlParameterSource()
                 .addValue("name", name)

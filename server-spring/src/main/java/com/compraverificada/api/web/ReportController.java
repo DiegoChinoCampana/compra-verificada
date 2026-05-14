@@ -1,5 +1,6 @@
 package com.compraverificada.api.web;
 
+import com.compraverificada.api.service.HotSaleRoundupService;
 import com.compraverificada.api.service.RecommendationService;
 import com.compraverificada.api.sql.ProductScopeQuery;
 import com.compraverificada.api.sql.SqlSnippets;
@@ -25,10 +26,15 @@ public class ReportController {
 
     private final NamedParameterJdbcTemplate jdbc;
     private final RecommendationService recommendation;
+    private final HotSaleRoundupService hotSaleRoundupService;
 
-    public ReportController(NamedParameterJdbcTemplate jdbc, RecommendationService recommendation) {
+    public ReportController(
+            NamedParameterJdbcTemplate jdbc,
+            RecommendationService recommendation,
+            HotSaleRoundupService hotSaleRoundupService) {
         this.jdbc = jdbc;
         this.recommendation = recommendation;
+        this.hotSaleRoundupService = hotSaleRoundupService;
     }
 
     private static String wrapWithCte(boolean useCte, String body) {
@@ -36,6 +42,13 @@ public class ReportController {
                 ? "WITH " + SqlSnippets.canonicalProductTitleCte()
                 : "WITH " + SqlSnippets.runsOnePerDayCte())
                 + "\n" + body;
+    }
+
+    /** Guía Hot Sale (mismo contrato que Node {@code GET /api/report/hot-sale-roundup}). */
+    @GetMapping("/hot-sale-roundup")
+    public ResponseEntity<?> hotSaleRoundup(
+            @RequestParam(value = "days", required = false) Integer daysRaw) {
+        return hotSaleRoundupService.hotSaleRoundup(daysRaw);
     }
 
     @GetMapping("/article/{articleId}")
@@ -260,7 +273,9 @@ public class ReportController {
             default: {
                 String sql = peersTemplateAuto()
                         .replace("/*GK2*/", SqlSnippets.productGroupingKey("r2"))
-                        .replace("/*GKR*/", SqlSnippets.productGroupingKey("r"));
+                        .replace("/*GKR*/", SqlSnippets.productGroupingKey("r"))
+                        .replace("/*CF2*/", " AND " + SqlSnippets.whereRespectClusterWhenPresent("r2"))
+                        .replace("/*CFR*/", " AND " + SqlSnippets.whereRespectClusterWhenPresent("r"));
                 return jdbc.queryForList(sql, params);
             }
         }
@@ -323,7 +338,7 @@ public class ReportController {
                   FROM results r2
                   INNER JOIN scrape_runs sr2 ON sr2.id = r2.scrape_run_id
                   INNER JOIN rod ON rod.scrape_run_id = sr2.id
-                  WHERE r2.search_id = g.id AND r2.price IS NOT NULL
+                  WHERE r2.search_id = g.id AND r2.price IS NOT NULL/*CF2*/
                 ),
                 canonical_norm_title AS (
                   SELECT pr.norm_title
@@ -337,8 +352,8 @@ public class ReportController {
               ) canon ON true
               INNER JOIN results r ON r.search_id = g.id AND r.price IS NOT NULL
               INNER JOIN scrape_runs sr ON sr.id = r.scrape_run_id
-              WHERE canon.norm_title IS NULL
-                OR /*GKR*/ = canon.norm_title
+              WHERE (canon.norm_title IS NULL
+                OR /*GKR*/ = canon.norm_title)/*CFR*/
               GROUP BY g.id, sr.id, sr.executed_at
             ),
             per_day AS (

@@ -19,6 +19,7 @@ import {
   sqlProductGroupingKey,
   sqlWhereManualProductTitleAndSeller,
   sqlWhereProductKey,
+  sqlWhereRespectClusterWhenPresent,
 } from "../sql/articleSameProductTitle.js";
 
 export const analyticsRouter = Router();
@@ -556,6 +557,7 @@ const PEERS_AUTO_SQL = `
           INNER JOIN scrape_runs sr2 ON sr2.id = r2.scrape_run_id
           INNER JOIN rod ON rod.scrape_run_id = sr2.id
           WHERE r2.search_id = g.id AND r2.price IS NOT NULL
+            AND ${sqlWhereRespectClusterWhenPresent("r2")}
         ),
         canonical_norm_title AS (
           SELECT pr.norm_title
@@ -569,8 +571,9 @@ const PEERS_AUTO_SQL = `
       ) canon ON true
       INNER JOIN results r ON r.search_id = g.id AND r.price IS NOT NULL
       INNER JOIN scrape_runs sr ON sr.id = r.scrape_run_id
-      WHERE canon.norm_title IS NULL
-        OR ${sqlProductGroupingKey("r")} = canon.norm_title
+      WHERE (canon.norm_title IS NULL
+        OR ${sqlProductGroupingKey("r")} = canon.norm_title)
+        AND ${sqlWhereRespectClusterWhenPresent("r")}
       GROUP BY g.id, sr.id, sr.executed_at
     ),
     per_day AS (

@@ -40,12 +40,19 @@ function moneyFmt(n: number): string {
 function rowChartLabel(r: PriceStabilityRow): string {
   const title = (r.sample_listing_title?.trim() || r.product_title).trim();
   const gk = r.group_key.trim();
+  let base: string;
   if (gk.startsWith("cluster:")) {
     const k = gk.length > 18 ? `${gk.slice(0, 16)}…` : gk;
     const t = title.length > 24 ? `${title.slice(0, 22)}…` : title;
-    return `${k} · ${t}`;
+    base = `${k} · ${t}`;
+  } else {
+    base = title.length > 44 ? `${title.slice(0, 42)}…` : title;
   }
-  return title.length > 44 ? `${title.slice(0, 42)}…` : title;
+  if (r.seller && r.seller.toLowerCase() !== "(sin tienda)") {
+    const sv = r.seller.length > 22 ? `${r.seller.slice(0, 20)}…` : r.seller;
+    return `${base} · ${sv}`;
+  }
+  return base;
 }
 
 const LINE_SERIES_CAP = 25;
@@ -111,6 +118,7 @@ type SeriesMeta = {
   productTitle: string;
   sampleListingTitle: string;
   groupKey: string;
+  seller: string;
 };
 
 type DailyTooltipPayloadItem = {
@@ -162,7 +170,7 @@ function DailyMinEvolutionTooltip({
           const n = typeof raw === "number" ? raw : raw != null && raw !== "" ? Number(raw) : NaN;
           const priceStr = Number.isFinite(n) ? moneyFmt(n) : "—";
           const meta = seriesMeta.get(seriesId);
-          const scope = meta ? productScopeFromGroupKey(meta.groupKey) : "";
+          const scope = meta ? productScopeFromGroupKey(meta.groupKey, meta.seller) : "";
           const base = meta ? `/articulos/${meta.primaryArticleId}` : "";
 
           return (
@@ -330,6 +338,7 @@ export function AnalysisPriceStabilityPage() {
         productTitle: r.product_title,
         sampleListingTitle: r.sample_listing_title,
         groupKey: r.group_key,
+        seller: r.seller,
       });
     }
     return m;
@@ -351,8 +360,9 @@ export function AnalysisPriceStabilityPage() {
         período. Se unen los resultados scrapeados de <strong>todas las fichas</strong> que coinciden
         y se agrupan por <strong>clave de producto semántica</strong> (<code>product_key</code> del batch de
         clustering) cuando existe; si no, por <strong>título de publicación normalizado</strong> (mismo
-        criterio que el tablero). Cada fila es un producto concreto, aunque aparezca en varias búsquedas.
-        Orden: primero los que menos variaron o bajaron de precio, con menos oscilación entre días.
+        criterio que el tablero). Cada fila es un producto concreto en una <strong>tienda</strong> (
+        <code>results.seller</code> normalizado), aunque el mismo cluster aparezca en varias fichas u otros
+        vendedores. Orden: primero los que menos variaron o bajaron de precio, con menos oscilación entre días.
       </p>
 
       <AnalysisTechnicalHelp>
@@ -376,10 +386,11 @@ export function AnalysisPriceStabilityPage() {
           juntar filas de <strong>varias fichas</strong> distintas.
         </p>
         <p>
-          Por cada combinación <strong>ficha + día calendario</strong> se elige la corrida más reciente
-          ese día; el precio del día para ese título es el <strong>mínimo</strong> entre las publicaciones
-          de esa corrida. Solo entran títulos con al menos 2 días con dato en la ventana. El orden del
-          gráfico prioriza poca variación o baja de precio y baja oscilación relativa entre días.
+          Por cada combinación <strong>clave de producto + tienda</strong>, el precio del día es el{" "}
+          <strong>mínimo</strong> entre las publicaciones de <em>esa tienda</em> en la corrida elegida. Así los
+          saltos no mezclan ofertas de vendedores distintos. Solo entran series con al menos 2 días con dato en
+          la ventana. El orden del gráfico prioriza poca variación o baja de precio y baja oscilación relativa
+          entre días.
         </p>
       </AnalysisTechnicalHelp>
 
@@ -421,7 +432,7 @@ export function AnalysisPriceStabilityPage() {
       {!loading && data && (
         <>
           <p className="muted small" style={{ margin: "0.75rem 0" }}>
-            «{data.name}» ·             ventana {data.days} días · {data.count} productos distintos (clave o título) con al menos 2 días
+            «{data.name}» ·             ventana {data.days} días · {data.count} series (producto + tienda) con al menos 2 días
             de precio en el período (corrida más reciente por día y ficha).
           </p>
           {data.rows.length === 0 ? (
@@ -516,8 +527,8 @@ export function AnalysisPriceStabilityPage() {
                   </h3>
                   <p className="muted small">
                     Por cada día calendario se muestra el <strong>mínimo de precio</strong> entre
-                    publicaciones de ese <strong>mismo título</strong> (misma lógica que el análisis). Una
-                    línea por cada título del listado.
+                    publicaciones de ese <strong>mismo producto y misma tienda</strong>. Una línea por cada
+                    fila del listado.
                   </p>
                   {dailyTruncated && (
                     <p className="warn" style={{ marginTop: 0 }}>
@@ -575,6 +586,9 @@ export function AnalysisPriceStabilityPage() {
               <table className="table table--dense table--col-help table--price-stability">
                 <thead>
                   <tr>
+                    <th title="Vendedor/tienda normalizado; el mínimo diario es solo dentro de esta tienda.">
+                      Tienda
+                    </th>
                     <th title="Si hay clustering, se muestra la product_key y debajo un título de listado representativo; si no, solo el título normalizado.">
                       Producto
                     </th>
@@ -606,10 +620,11 @@ export function AnalysisPriceStabilityPage() {
                 </thead>
                 <tbody>
                   {data.rows.map((r) => {
-                    const scope = productScopeFromGroupKey(r.group_key);
+                    const scope = productScopeFromGroupKey(r.group_key, r.seller);
                     const base = `/articulos/${r.primary_article_id}`;
                     return (
-                    <tr key={r.series_id}>
+                    <tr key={`${r.series_id}-${r.seller}`}>
+                      <td className="muted small">{r.seller}</td>
                       <td>
                         <AnalysisProductCell
                           row={{

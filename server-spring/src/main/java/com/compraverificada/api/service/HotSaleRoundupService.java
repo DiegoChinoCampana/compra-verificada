@@ -1,5 +1,7 @@
-package com.compraverificada.api.web;
+package com.compraverificada.api.service;
 
+import com.compraverificada.api.sql.SqlSnippets;
+import com.compraverificada.api.web.HotSaleNarrative;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -8,10 +10,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.stereotype.Service;
 
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
@@ -26,13 +25,19 @@ import java.util.stream.Collectors;
 
 /**
  * Guía Hot Sale: productos votados en Instagram + top fichas con precio a la baja.
- * Slots: {@code configs.name = hot_sale_voted_slots} o env {@code HOT_SALE_VOTED_JSON} (mismo JSON que Node).
+ * El {@code GET} HTTP vive en {@link com.compraverificada.api.web.ReportController} para compartir
+ * {@code /report} con el informe y evitar registro duplicado o estático 404.
  */
-@RestController
-@RequestMapping("/report")
-public class HotSaleRoundupController {
+@Service
+public class HotSaleRoundupService {
 
-    private static final String TRENDS_SQL = """
+    private static String trendsSql() {
+        return TRENDS_SQL_TEMPLATE
+                .replace("/*GK*/", SqlSnippets.productGroupingKey("r"))
+                .replace("/*CF*/", " AND " + SqlSnippets.whereRespectClusterWhenPresent("r"));
+    }
+
+    private static final String TRENDS_SQL_TEMPLATE = """
             WITH params AS (
               SELECT CAST(:days AS int) AS days_window
             ),
@@ -49,11 +54,41 @@ public class HotSaleRoundupController {
                 AND sr.executed_at >= NOW() - (p.days_window * interval '1 day')
               ORDER BY r.search_id, date_trunc('day', sr.executed_at), sr.executed_at DESC
             ),
+            run_cheapest_key AS (
+              SELECT DISTINCT ON (d.search_id, d.scrape_run_id)
+                d.search_id,
+                d.scrape_run_id,
+                d.executed_at,
+                /*GK*/ AS gk
+              FROM runs_one_per_day d
+              INNER JOIN results r ON r.search_id = d.search_id AND r.scrape_run_id = d.scrape_run_id
+              WHERE r.price IS NOT NULL AND r.price > 0/*CF*/
+                AND length(trim(/*GK*/)) > 0
+              ORDER BY d.search_id, d.scrape_run_id, r.price ASC NULLS LAST, r.id ASC
+            ),
+            canonical_per_article AS (
+              SELECT search_id, canonical_gk
+              FROM (
+                SELECT search_id, gk AS canonical_gk,
+                  ROW_NUMBER() OVER (
+                    PARTITION BY search_id
+                    ORDER BY win_cnt DESC, win_last DESC
+                  ) AS rn
+                FROM (
+                  SELECT search_id, gk, COUNT(*)::int AS win_cnt, MAX(executed_at) AS win_last
+                  FROM run_cheapest_key
+                  GROUP BY search_id, gk
+                ) tallies
+              ) z
+              WHERE rn = 1
+            ),
             run_mins AS (
               SELECT d.search_id, d.scrape_run_id, d.executed_at, MIN(r.price)::float8 AS min_price
               FROM runs_one_per_day d
+              INNER JOIN canonical_per_article ck ON ck.search_id = d.search_id
               INNER JOIN results r ON r.search_id = d.search_id AND r.scrape_run_id = d.scrape_run_id
-              WHERE r.price IS NOT NULL AND r.price > 0
+              WHERE r.price IS NOT NULL AND r.price > 0/*CF*/
+                AND /*GK*/ = ck.canonical_gk
               GROUP BY d.search_id, d.scrape_run_id, d.executed_at
             ),
             daily AS (
@@ -165,15 +200,74 @@ public class HotSaleRoundupController {
         public String detail;
     }
 
-    private static final Logger log = LoggerFactory.getLogger(HotSaleRoundupController.class);
+    private static final Logger log = LoggerFactory.getLogger(HotSaleRoundupService.class);
     private static final String HOT_SALE_CONFIG_NAME = "hot_sale_voted_slots";
 
     private final NamedParameterJdbcTemplate jdbc;
     private final ObjectMapper objectMapper;
 
-    public HotSaleRoundupController(NamedParameterJdbcTemplate jdbc, ObjectMapper objectMapper) {
+    public HotSaleRoundupService(NamedParameterJdbcTemplate jdbc, ObjectMapper objectMapper) {
         this.jdbc = jdbc;
         this.objectMapper = objectMapper;
+    }
+
+    public ResponseEntity<?> hotSaleRoundup(Integer daysRaw) {
+        int days = parseDays(daysRaw);
+        MapSqlParameterSource p = new MapSqlParameterSource("days", days);
+        List<Map<String, Object>> trendRows = jdbc.queryForList(trendsSql(), p);
+
+        Map<Integer, Map<String, Object>> trendByArticle = new LinkedHashMap<>();
+        for (Map<String, Object> row : trendRows) {
+            Object idObj = row.get("article_id");
+            if (!(idObj instanceof Number n)) {
+                continue;
+            }
+            trendByArticle.put(n.intValue(), row);
+        }
+
+        List<VotedSlot> slots = loadVotedSlots();
+        List<EnrichedVote> enriched = enrichVotes(slots);
+
+        Set<Integer> votedIds = enriched.stream()
+                .map(EnrichedVote::effectiveArticleId)
+                .filter(id -> id != null && id > 0)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+
+        List<Integer> linkedIds = enriched.stream()
+                .map(EnrichedVote::effectiveArticleId)
+                .filter(id -> id != null && id > 0)
+                .distinct()
+                .toList();
+
+        Map<Integer, Map<String, Object>> articlesMeta = fetchArticlesMeta(linkedIds);
+
+        List<Map<String, Object>> voted = new ArrayList<>();
+        for (EnrichedVote ev : enriched) {
+            voted.add(votedRow(ev, trendByArticle, articlesMeta));
+        }
+
+        List<Map<String, Object>> topDrops = trendRows.stream()
+                .filter(r -> {
+                    Object idObj = r.get("article_id");
+                    Object trObj = r.get("trend_pct");
+                    if (!(idObj instanceof Number nid) || !(trObj instanceof Number tr)) {
+                        return false;
+                    }
+                    return tr.doubleValue() < 0 && !votedIds.contains(nid.intValue());
+                })
+                .sorted(Comparator.comparingDouble(r -> ((Number) r.get("trend_pct")).doubleValue()))
+                .limit(10)
+                .map(HotSaleRoundupService::toDropPayload)
+                .toList();
+
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("generatedAt", OffsetDateTime.now().toString());
+        body.put("days", days);
+        body.put("disclaimer",
+                "Información orientativa según publicaciones relevadas; los precios pueden cambiar. No es asesoramiento financiero.");
+        body.put("voted", voted);
+        body.put("topPriceDrops", topDrops);
+        return ResponseEntity.ok(body);
     }
 
     private List<VotedSlot> parseVotedSlotsJson(String json) throws java.io.IOException {
@@ -324,64 +418,6 @@ public class HotSaleRoundupController {
             }
         }
         return out;
-    }
-
-    @GetMapping("/hot-sale-roundup")
-    public ResponseEntity<?> hotSaleRoundup(@RequestParam(value = "days", required = false) Integer daysRaw) {
-        int days = parseDays(daysRaw);
-        MapSqlParameterSource p = new MapSqlParameterSource("days", days);
-        List<Map<String, Object>> trendRows = jdbc.queryForList(TRENDS_SQL, p);
-
-        Map<Integer, Map<String, Object>> trendByArticle = new LinkedHashMap<>();
-        for (Map<String, Object> row : trendRows) {
-            Object idObj = row.get("article_id");
-            if (!(idObj instanceof Number n)) continue;
-            trendByArticle.put(n.intValue(), row);
-        }
-
-        List<VotedSlot> slots = loadVotedSlots();
-        List<EnrichedVote> enriched = enrichVotes(slots);
-
-        Set<Integer> votedIds = enriched.stream()
-                .map(EnrichedVote::effectiveArticleId)
-                .filter(id -> id != null && id > 0)
-                .collect(Collectors.toCollection(LinkedHashSet::new));
-
-        List<Integer> linkedIds = enriched.stream()
-                .map(EnrichedVote::effectiveArticleId)
-                .filter(id -> id != null && id > 0)
-                .distinct()
-                .toList();
-
-        Map<Integer, Map<String, Object>> articlesMeta = fetchArticlesMeta(linkedIds);
-
-        List<Map<String, Object>> voted = new ArrayList<>();
-        for (EnrichedVote ev : enriched) {
-            voted.add(votedRow(ev, trendByArticle, articlesMeta));
-        }
-
-        List<Map<String, Object>> topDrops = trendRows.stream()
-                .filter(r -> {
-                    Object idObj = r.get("article_id");
-                    Object trObj = r.get("trend_pct");
-                    if (!(idObj instanceof Number nid) || !(trObj instanceof Number tr)) {
-                        return false;
-                    }
-                    return tr.doubleValue() < 0 && !votedIds.contains(nid.intValue());
-                })
-                .sorted(Comparator.comparingDouble(r -> ((Number) r.get("trend_pct")).doubleValue()))
-                .limit(10)
-                .map(HotSaleRoundupController::toDropPayload)
-                .toList();
-
-        Map<String, Object> body = new LinkedHashMap<>();
-        body.put("generatedAt", OffsetDateTime.now().toString());
-        body.put("days", days);
-        body.put("disclaimer",
-                "Información orientativa según publicaciones relevadas; los precios pueden cambiar. No es asesoramiento financiero.");
-        body.put("voted", voted);
-        body.put("topPriceDrops", topDrops);
-        return ResponseEntity.ok(body);
     }
 
     private static Map<String, Object> toDropPayload(Map<String, Object> row) {

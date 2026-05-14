@@ -19,6 +19,16 @@ public final class SqlSnippets {
     }
 
     /**
+     * Tienda/vendedor normalizado; vacío → {@code (sin tienda)} (igual que en Node
+     * {@code sqlNormSeller}).
+     */
+    public static String normSeller(String alias) {
+        String collapsed = "trim(both from regexp_replace(lower(coalesce(" + alias
+                + ".seller, '')), E'\\\\s+', ' ', 'g'))";
+        return "COALESCE(NULLIF(" + collapsed + ", ''), '(sin tienda)')";
+    }
+
+    /**
      * Clave de agrupación estable: {@code product_key} si existe, si no el título normalizado.
      */
     public static String productGroupingKey(String alias) {
@@ -84,6 +94,7 @@ public final class SqlSnippets {
                 "  INNER JOIN scrape_runs sr ON sr.id = r.scrape_run_id\n" +
                 "  INNER JOIN runs_one_per_day d ON d.scrape_run_id = sr.id\n" +
                 "  WHERE r.search_id = :articleId AND r.price IS NOT NULL\n" +
+                "    AND " + whereRespectClusterWhenPresent("r") + "\n" +
                 "),\n" +
                 "canonical_norm_title AS (\n" +
                 "  SELECT\n" +
@@ -119,6 +130,23 @@ public final class SqlSnippets {
         return "(\n" +
                 "  NOT EXISTS (SELECT 1 FROM canonical_norm_title)\n" +
                 "  OR " + gk + " = (SELECT c.norm_title FROM canonical_norm_title c)\n" +
+                ")";
+    }
+
+    /**
+     * Si en la misma corrida hay al menos un listado con {@code product_key}, excluye filas sin clave
+     * al calcular mínimos / canónico / peers.
+     */
+    public static String whereRespectClusterWhenPresent(String alias) {
+        return "(\n" +
+                "  NOT EXISTS (\n" +
+                "    SELECT 1 FROM results r_ck\n" +
+                "    WHERE r_ck.search_id = " + alias + ".search_id\n" +
+                "      AND r_ck.scrape_run_id = " + alias + ".scrape_run_id\n" +
+                "      AND r_ck.price IS NOT NULL\n" +
+                "      AND NULLIF(trim(r_ck.product_key), '') IS NOT NULL\n" +
+                "  )\n" +
+                "  OR NULLIF(trim(" + alias + ".product_key), '') IS NOT NULL\n" +
                 ")";
     }
 }

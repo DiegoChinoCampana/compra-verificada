@@ -184,6 +184,14 @@ export function OperationalPage() {
           API (desde la raíz del repo: <code>npm run dev</code> levanta web + API; el servidor usa{" "}
           <code>tsx watch</code> y suele recargar solo al guardar archivos en <code>server/</code>).
         </p>
+        <p className="muted small" style={{ marginTop: "0.35rem" }}>
+          Además del embedding, el agrupamiento respeta una <strong>firma de medida en el título</strong>{" "}
+          cuando el texto la expresa (dimensiones tipo <code>160x200</code> o <code>10x20x30</code>,{" "}
+          <code>ml</code> / litros, <code>cm³</code>, pulgadas, etc.): dos listados solo pueden ir al
+          mismo cluster si esa firma coincide o si <strong>ninguno</strong> tiene firma detectable en el
+          título. Tras cambiar esa lógica, conviene marcar «Borrar product_key en todo el artículo +
+          ventana» y volver a ejecutar para el artículo afectado.
+        </p>
         {clusterMeta && clusterMeta.openAiConfigured === false ? (
           <p className="error" style={{ marginTop: "0.5rem" }}>
             Este servidor <strong>no tiene</strong> <code>OPENAI_API_KEY</code>: el modo completo o
