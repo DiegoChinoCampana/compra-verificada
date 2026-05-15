@@ -230,7 +230,7 @@ public class HotSaleRoundupService {
               GROUP BY search_id
             ),
             ordered_market AS (
-              SELECT search_id, min_price, executed_at,
+              SELECT search_id, min_price, executed_at, scrape_run_id,
                 ROW_NUMBER() OVER (PARTITION BY search_id ORDER BY executed_at ASC) AS rn_first,
                 ROW_NUMBER() OVER (PARTITION BY search_id ORDER BY executed_at DESC) AS rn_last
               FROM run_mins_market
@@ -239,13 +239,21 @@ public class HotSaleRoundupService {
               SELECT search_id,
                 MAX(min_price) FILTER (WHERE rn_first = 1) AS first_min,
                 MAX(min_price) FILTER (WHERE rn_last = 1) AS last_min,
+                MAX(executed_at) FILTER (WHERE rn_last = 1) AS last_market_at,
+                MAX(scrape_run_id) FILTER (WHERE rn_last = 1) AS last_market_run_id,
                 COUNT(*)::int AS n_points
               FROM ordered_market
               GROUP BY search_id
               HAVING COUNT(*) >= 2
             ),
             trends_market AS (
-              SELECT e.search_id AS article_id, e.first_min, e.last_min, e.n_points,
+              SELECT
+                e.search_id AS article_id,
+                e.first_min,
+                e.last_min,
+                e.last_market_at,
+                e.last_market_run_id,
+                e.n_points,
                 CASE WHEN e.first_min > 0 THEN ((e.last_min - e.first_min) / e.first_min)::float8 END AS trend_pct,
                 ws.w_min, ws.w_max, ws.w_median, ds.max_dod_drop_pct
               FROM ends_market e
@@ -273,7 +281,20 @@ public class HotSaleRoundupService {
               tm.w_min::float8 AS market_w_min,
               tm.w_max::float8 AS market_w_max,
               tm.w_median::float8 AS market_w_median,
-              tm.max_dod_drop_pct::float8 AS market_max_dod_drop_pct
+              tm.max_dod_drop_pct::float8 AS market_max_dod_drop_pct,
+              tm.last_market_at AS market_last_at,
+              (
+                SELECT (/*SK*/)::text
+                FROM results r
+                INNER JOIN canonical_per_article ck ON ck.search_id = r.search_id
+                WHERE r.search_id = ta.article_id
+                  AND r.scrape_run_id = tm.last_market_run_id
+                  AND r.price IS NOT NULL AND r.price > 0/*CF*/
+                  AND /*GK*/ = ck.canonical_gk
+                  AND ABS(r.price - tm.last_min) <= GREATEST(0.01::float8, (tm.last_min * 0.0001)::float8)
+                ORDER BY r.id ASC
+                LIMIT 1
+              ) AS market_last_cheapest_seller
             FROM trends_anchor ta
             INNER JOIN trends_market tm ON tm.article_id = ta.article_id
             INNER JOIN articles a ON a.id = ta.article_id AND a.enabled = TRUE
@@ -325,6 +346,25 @@ public class HotSaleRoundupService {
     public HotSaleRoundupService(NamedParameterJdbcTemplate jdbc, ObjectMapper objectMapper) {
         this.jdbc = jdbc;
         this.objectMapper = objectMapper;
+    }
+
+    /**
+     * Misma fila que {@link #hotSaleRoundup(Integer)} (guía Hot Sale) para un solo artículo.
+     */
+    public Map<String, Object> fetchTrendRowForArticleOrNull(int articleId, int days) {
+        if (articleId <= 0) {
+            return null;
+        }
+        int d = parseDays(days);
+        String sql = trendsSql() + "\nWHERE ta.article_id = :articleId";
+        MapSqlParameterSource p = new MapSqlParameterSource()
+                .addValue("days", d)
+                .addValue("articleId", articleId);
+        List<Map<String, Object>> rows = jdbc.queryForList(sql, p);
+        if (rows.isEmpty()) {
+            return null;
+        }
+        return rows.get(0);
     }
 
     public ResponseEntity<?> hotSaleRoundup(Integer daysRaw) {
@@ -572,6 +612,8 @@ public class HotSaleRoundupService {
         m.put("market_w_max", row.get("market_w_max"));
         m.put("market_w_median", row.get("market_w_median"));
         m.put("market_max_dod_drop_pct", row.get("market_max_dod_drop_pct"));
+        m.put("market_last_at", row.get("market_last_at"));
+        m.put("market_last_cheapest_seller", row.get("market_last_cheapest_seller"));
         m.put("narrative", buildNarrativeFromSqlRow(row));
         return m;
     }

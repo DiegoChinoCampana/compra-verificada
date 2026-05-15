@@ -32,6 +32,10 @@ export type HotSaleTrendRow = {
   market_w_max: number;
   market_w_median: number;
   market_max_dod_drop_pct: number;
+  /** Fecha/hora del relevamiento usado como «último» en la serie mercado (misma ventana). */
+  market_last_at: string | null;
+  /** Vendedor del listado más barato en ese último relevamiento mercado. */
+  market_last_cheapest_seller: string | null;
   narrative: HotSaleNarrative;
 };
 
@@ -286,7 +290,7 @@ dod_stats_market AS (
   GROUP BY search_id
 ),
 ordered_market AS (
-  SELECT search_id, min_price, executed_at,
+  SELECT search_id, min_price, executed_at, scrape_run_id,
     ROW_NUMBER() OVER (PARTITION BY search_id ORDER BY executed_at ASC) AS rn_first,
     ROW_NUMBER() OVER (PARTITION BY search_id ORDER BY executed_at DESC) AS rn_last
   FROM run_mins_market
@@ -295,6 +299,8 @@ ends_market AS (
   SELECT search_id,
     MAX(min_price) FILTER (WHERE rn_first = 1) AS first_min,
     MAX(min_price) FILTER (WHERE rn_last = 1) AS last_min,
+    MAX(executed_at) FILTER (WHERE rn_last = 1) AS last_market_at,
+    MAX(scrape_run_id) FILTER (WHERE rn_last = 1) AS last_market_run_id,
     COUNT(*)::int AS n_points
   FROM ordered_market
   GROUP BY search_id
@@ -305,6 +311,8 @@ trends_market AS (
     e.search_id AS article_id,
     e.first_min,
     e.last_min,
+    e.last_market_at,
+    e.last_market_run_id,
     e.n_points,
     CASE WHEN e.first_min > 0 THEN ((e.last_min - e.first_min) / e.first_min)::float8 END AS trend_pct,
     ws.w_min,
@@ -336,7 +344,21 @@ SELECT
   tm.w_min::float8 AS market_w_min,
   tm.w_max::float8 AS market_w_max,
   tm.w_median::float8 AS market_w_median,
-  tm.max_dod_drop_pct::float8 AS market_max_dod_drop_pct
+  tm.max_dod_drop_pct::float8 AS market_max_dod_drop_pct,
+  tm.last_market_at::timestamptz AS market_last_at,
+  (
+    SELECT (${sqlNormSeller("r")})::text
+    FROM results r
+    INNER JOIN canonical_per_article ck ON ck.search_id = r.search_id
+    WHERE r.search_id = ta.article_id
+      AND r.scrape_run_id = tm.last_market_run_id
+      AND r.price IS NOT NULL AND r.price > 0
+      AND ${sqlWhereRespectClusterWhenPresent("r")}
+      AND ${sqlProductGroupingKey("r")} = ck.canonical_gk
+      AND ABS(r.price - tm.last_min) <= GREATEST(0.01::float8, (tm.last_min * 0.0001)::float8)
+    ORDER BY r.id ASC
+    LIMIT 1
+  ) AS market_last_cheapest_seller
 FROM trends_anchor ta
 INNER JOIN trends_market tm ON tm.article_id = ta.article_id
 INNER JOIN articles a ON a.id = ta.article_id AND a.enabled = TRUE
@@ -369,6 +391,16 @@ function rowToTrendPayload(r: Record<string, unknown>): HotSaleTrendRow {
   const ts = r.trend_seller;
   const trend_seller =
     ts == null || String(ts).trim() === "" ? null : String(ts);
+  const mla = r.market_last_at;
+  const market_last_at =
+    mla == null
+      ? null
+      : mla instanceof Date
+        ? mla.toISOString()
+        : String(mla);
+  const mlcs = r.market_last_cheapest_seller;
+  const market_last_cheapest_seller =
+    mlcs == null || String(mlcs).trim() === "" ? null : String(mlcs);
   const narrative = buildHotSaleNarrative({
     first_min,
     last_min,
@@ -404,6 +436,8 @@ function rowToTrendPayload(r: Record<string, unknown>): HotSaleTrendRow {
     market_w_max,
     market_w_median,
     market_max_dod_drop_pct,
+    market_last_at,
+    market_last_cheapest_seller,
     narrative,
   };
 }
@@ -630,6 +664,20 @@ async function fetchArticlesMeta(ids: number[]): Promise<Map<number, { article: 
     });
   }
   return m;
+}
+
+/** Misma fila que la guía Hot Sale (`TRENDS_SQL`) para un solo `article_id`. */
+export async function fetchHotSaleTrendRowForArticle(
+  articleId: number,
+  queryDays: unknown,
+): Promise<HotSaleTrendRow | null> {
+  if (!Number.isInteger(articleId) || articleId <= 0) return null;
+  const days = parseDays(queryDays);
+  const sql = `${TRENDS_SQL}\nWHERE ta.article_id = $2::int`;
+  const { rows } = await pool.query(sql, [days, articleId]);
+  const r = rows[0] as Record<string, unknown> | undefined;
+  if (!r) return null;
+  return rowToTrendPayload(r);
 }
 
 export async function buildHotSaleRoundup(queryDays: unknown): Promise<HotSaleRoundupPayload> {
