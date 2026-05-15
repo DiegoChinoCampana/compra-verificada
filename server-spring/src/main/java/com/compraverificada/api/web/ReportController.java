@@ -14,6 +14,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -252,9 +253,54 @@ public class ReportController {
         body.put("recommendation", rec);
         Map<String, Object> hotSaleResumen = hotSaleResumenSnapshotService.fetchOrNull(articleId, hotSaleDays);
         if (hotSaleResumen != null) {
+            alignHotSaleResumenWithPeerLatest(hotSaleResumen, articleId, peers, bestPerRun);
             body.put("hotSaleResumen", hotSaleResumen);
         }
         return ResponseEntity.ok(body);
+    }
+
+    /**
+     * Precio/fecha del bloque Hot Sale = misma fuente que la tabla de marcas (último día con corrida),
+     * para no chocar con el cierre de la serie “una lectura por día” de la guía.
+     */
+    private static void alignHotSaleResumenWithPeerLatest(
+            Map<String, Object> hs,
+            int articleId,
+            List<Map<String, Object>> peers,
+            List<Map<String, Object>> bestPerRun) {
+        if (hs == null || hs.isEmpty()) {
+            return;
+        }
+        for (Map<String, Object> row : peers) {
+            Object idObj = row.get("id");
+            if (!(idObj instanceof Number n) || n.intValue() != articleId) {
+                continue;
+            }
+            Double price = asDouble(row.get("latest_run_min_price"));
+            Object at = row.get("latest_run_at");
+            if (price == null || price <= 0 || at == null) {
+                return;
+            }
+            hs.put("lastRunMinAny", price);
+            hs.put("lastRunAt", peerLatestAtToIso(at));
+            if (!bestPerRun.isEmpty()) {
+                Object s = bestPerRun.get(bestPerRun.size() - 1).get("seller");
+                if (s != null && !String.valueOf(s).isBlank()) {
+                    hs.put("lastRunCheapestSeller", String.valueOf(s).trim());
+                }
+            }
+            return;
+        }
+    }
+
+    private static String peerLatestAtToIso(Object at) {
+        if (at instanceof java.sql.Timestamp ts) {
+            return ts.toInstant().toString();
+        }
+        if (at instanceof OffsetDateTime odt) {
+            return odt.toInstant().toString();
+        }
+        return Instant.parse(String.valueOf(at)).toString();
     }
 
     private List<Map<String, Object>> peersFor(Map<String, Object> article, ProductScopeQuery pq) {

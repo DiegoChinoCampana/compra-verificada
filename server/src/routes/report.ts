@@ -16,9 +16,33 @@ import {
   sqlWhereRespectClusterWhenPresent,
 } from "../sql/articleSameProductTitle.js";
 import { buildHotSaleRoundup } from "../hotSaleRoundup.js";
-import { fetchHotSaleResumenSnapshot } from "../hotSaleResumenSnapshot.js";
+import { fetchHotSaleResumenSnapshot, type HotSaleResumenSnapshot } from "../hotSaleResumenSnapshot.js";
 
 export const reportRouter = Router();
+
+/** Mismo cierre que la tabla de marcas del resumen: evita 67.304 (serie Hot Sale) vs 67.282 (última corrida). */
+function alignHotSaleResumenWithPeerLatest(
+  hs: HotSaleResumenSnapshot,
+  articleId: number,
+  peersRows: { id: number; latest_run_min_price?: unknown; latest_run_at?: unknown }[],
+  bestOfferRows: { seller?: unknown }[],
+): HotSaleResumenSnapshot {
+  const self = peersRows.find((p) => p.id === articleId);
+  const p = self?.latest_run_min_price;
+  const at = self?.latest_run_at;
+  const price = typeof p === "number" ? p : p != null ? Number(p) : NaN;
+  if (!Number.isFinite(price) || price <= 0 || at == null) return hs;
+  const lastOffer = bestOfferRows.length > 0 ? bestOfferRows[bestOfferRows.length - 1] : null;
+  const rawSeller = lastOffer?.seller;
+  const sellerFromOffer =
+    rawSeller != null && String(rawSeller).trim() !== "" ? String(rawSeller).trim() : null;
+  return {
+    ...hs,
+    lastRunMinAny: price,
+    lastRunAt: new Date(String(at)).toISOString(),
+    lastRunCheapestSeller: sellerFromOffer ?? hs.lastRunCheapestSeller,
+  };
+}
 
 /** Guía Hot Sale: votados en Instagram + top fichas con precio a la baja en la ventana. */
 reportRouter.get("/hot-sale-roundup", async (req, res) => {
@@ -473,6 +497,13 @@ reportRouter.get("/article/:articleId", async (req, res) => {
     },
     recommendation,
   };
-  if (hotSaleResumen) body.hotSaleResumen = hotSaleResumen;
+  if (hotSaleResumen) {
+    body.hotSaleResumen = alignHotSaleResumenWithPeerLatest(
+      hotSaleResumen,
+      articleId,
+      peers.rows as { id: number; latest_run_min_price?: unknown; latest_run_at?: unknown }[],
+      bestPerRun.rows as { seller?: unknown }[],
+    );
+  }
   res.json(body);
 });

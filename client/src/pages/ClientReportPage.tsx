@@ -48,21 +48,23 @@ function HotSaleResumenBlock({ h }: { h: HotSaleResumenPayload }) {
     if (tr < -0.005) {
       trendLine = (
         <>
-          Comparado con el primer día con precio en ese período de {h.days} días, ese mínimo entre todas las tiendas{" "}
-          <strong>bajó</strong> alrededor de <strong>{absPct}</strong>.
+          En la serie de la <Link to={`/guia-hot-sale?days=${h.days}`}>Guía Hot Sale</Link> (una lectura por día en
+          esos {h.days} días), el mínimo entre todas las tiendas <strong>bajó</strong> alrededor de{" "}
+          <strong>{absPct}</strong>.
         </>
       );
     } else if (tr > 0.005) {
       trendLine = (
         <>
-          Comparado con el primer día con precio en ese período de {h.days} días, ese mínimo entre todas las tiendas{" "}
-          <strong>subió</strong> alrededor de <strong>{absPct}</strong>.
+          En la serie de la <Link to={`/guia-hot-sale?days=${h.days}`}>Guía Hot Sale</Link> (una lectura por día en
+          esos {h.days} días), el mínimo entre todas las tiendas <strong>subió</strong> alrededor de{" "}
+          <strong>{absPct}</strong>.
         </>
       );
     } else {
       trendLine = (
         <>
-          Respecto al inicio de esos {h.days} días, ese mínimo entre tiendas <strong>se mantuvo casi igual</strong>.
+          En la serie Hot Sale de esos {h.days} días, el mínimo entre tiendas <strong>se mantuvo casi igual</strong>.
         </>
       );
     }
@@ -74,11 +76,13 @@ function HotSaleResumenBlock({ h }: { h: HotSaleResumenPayload }) {
       <p className="muted small" style={{ marginBottom: "0.75rem", maxWidth: "48rem" }}>
         Igual que en la <Link to={`/guia-hot-sale?days=${h.days}`}>Guía Hot Sale</Link>: últimos{" "}
         <strong>{h.days}</strong> días para la tendencia; el &quot;mismo producto&quot; se alinea con el tablero usando
-        hasta <strong>365 días</strong> de historia para fijar la referencia. El precio más bajo es entre{" "}
-        <strong>cualquier</strong> tienda que venda ese producto.
+        hasta <strong>365 días</strong> de historia para fijar la referencia. La cifra grande coincide con la{" "}
+        <strong>última actualización de esta búsqueda</strong> (misma lógica que la tabla de marcas más abajo); el
+        porcentaje usa la serie diaria de la guía.
       </p>
       <p className="client-report__lead" style={{ marginBottom: "0.5rem" }}>
-        <strong>Ahora el más barato que tenemos anotado:</strong> {fmtMoneyResumen(h.lastRunMinAny)}
+        <strong>Precio más bajo relevado (última actualización de esta búsqueda):</strong>{" "}
+        {fmtMoneyResumen(h.lastRunMinAny)}
         <span className="muted"> (última actualización con dato: {when}).</span>
       </p>
       {trendLine ? (
@@ -87,7 +91,7 @@ function HotSaleResumenBlock({ h }: { h: HotSaleResumenPayload }) {
         </p>
       ) : null}
       <p className="muted small" style={{ maxWidth: "48rem", margin: 0 }}>
-        Ese valor venía de <strong>{sellerReadable(h.lastRunCheapestSeller)}</strong>.
+        Ese listado corresponde a <strong>{sellerReadable(h.lastRunCheapestSeller)}</strong>.
         {h.otherStoreBeatAnchor
           ? " Es más bajo que la oferta más barata del primer día de la ventana, cuando lideraba otra tienda."
           : null}
