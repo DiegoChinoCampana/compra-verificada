@@ -312,6 +312,14 @@ export type HotSaleVotedRoundupRow = {
   max_dod_drop_pct: number | null;
   /** Tienda ancla: misma lógica que topPriceDrops (vendedor del listado más barato del primer día en el clúster). */
   trend_seller?: string | null;
+  /**
+   * false si la tienda ancla no tiene precios del mismo producto en los últimos 7 días vs el último día mercado.
+   * Ausente = API vieja (asumir ancla vigente si hay trend_pct).
+   */
+  anchor_fresh?: boolean | null;
+  /** Origen de la ancla en el backend: first_day_cheapest | first_day_alt | last_run_cheapest. */
+  anchor_source?: string | null;
+  anchor_first_day_rank?: number | null;
   market_first_min?: number | null;
   market_last_min?: number | null;
   market_trend_pct?: number | null;
@@ -328,6 +336,10 @@ export type HotSalePriceDropRow = {
   article: string;
   brand: string | null;
   detail: string | null;
+  /** false = tienda ancla sin datos recientes; esta fila no debería aparecer en top caídas (filtro servidor). */
+  anchor_fresh?: boolean;
+  anchor_source?: string | null;
+  anchor_first_day_rank?: number | null;
   first_min: number;
   last_min: number;
   trend_pct: number;

@@ -34,15 +34,13 @@ export async function fetchHotSaleResumenSnapshot(
   const marketFirstMin = t.market_first_min;
   const anchorMaxInWindow = t.w_max;
   const lastAt = t.market_last_at;
+  const anchorStale = !t.anchor_fresh;
 
   if (
     !Number.isFinite(lastRunMinAny) ||
     lastRunMinAny <= 0 ||
-    !Number.isFinite(anchorFirstMin) ||
-    anchorFirstMin <= 0 ||
     !Number.isFinite(marketFirstMin) ||
     marketFirstMin <= 0 ||
-    !Number.isFinite(anchorMaxInWindow) ||
     !Number.isFinite(t.market_trend_pct) ||
     lastAt == null ||
     String(lastAt).trim() === ""
@@ -50,18 +48,32 @@ export async function fetchHotSaleResumenSnapshot(
     return null;
   }
 
+  if (
+    !anchorStale &&
+    (!Number.isFinite(anchorFirstMin) ||
+      anchorFirstMin == null ||
+      anchorFirstMin <= 0 ||
+      !Number.isFinite(anchorMaxInWindow) ||
+      anchorMaxInWindow == null)
+  ) {
+    return null;
+  }
+
   const marketTrendPct = t.market_trend_pct;
 
   const lastRunCheapestSeller = t.market_last_cheapest_seller;
-  const anchorSeller = t.trend_seller;
+  const anchorSeller = anchorStale ? null : t.trend_seller;
 
-  const eps = Math.max(0.01, anchorFirstMin * 0.002);
-  const loweredEnough = lastRunMinAny < anchorFirstMin - eps;
+  const eps =
+    anchorStale || anchorFirstMin == null ? 0 : Math.max(0.01, anchorFirstMin * 0.002);
+  const loweredEnough =
+    !anchorStale && anchorFirstMin != null && lastRunMinAny < anchorFirstMin - eps;
   const otherStore =
+    !anchorStale &&
     anchorSeller != null &&
     lastRunCheapestSeller != null &&
     lastRunCheapestSeller !== anchorSeller;
-  const otherStoreBeatAnchor = loweredEnough && otherStore;
+  const otherStoreBeatAnchor = Boolean(loweredEnough && otherStore);
 
   return {
     days,
@@ -71,8 +83,8 @@ export async function fetchHotSaleResumenSnapshot(
     marketTrendPct,
     lastRunCheapestSeller,
     anchorSeller,
-    anchorFirstMin,
-    anchorMaxInWindow,
+    anchorFirstMin: anchorStale || anchorFirstMin == null ? 0 : anchorFirstMin,
+    anchorMaxInWindow: anchorStale || anchorMaxInWindow == null ? 0 : anchorMaxInWindow,
     otherStoreBeatAnchor,
   };
 }

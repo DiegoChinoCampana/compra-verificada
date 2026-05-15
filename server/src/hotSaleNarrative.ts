@@ -26,6 +26,11 @@ type Metrics = {
   market_first_min?: number | null;
   market_last_min?: number | null;
   market_trend_pct?: number | null;
+  /**
+   * false: la tienda ancla no tiene datos del mismo producto en la ventana reciente
+   * (ver regla de frescura en SQL); no aplicamos bullets de ventana sobre la ancla.
+   */
+  anchor_fresh?: boolean;
 };
 
 export function buildHotSaleNarrative(m: Metrics): HotSaleNarrative {
@@ -36,6 +41,25 @@ export function buildHotSaleNarrative(m: Metrics): HotSaleNarrative {
     lastAboveWindowMedian: false,
     sharpDayDrop: false,
   };
+
+  const anchorFresh = m.anchor_fresh !== false;
+
+  if (!anchorFresh) {
+    const mf = m.market_first_min;
+    const ml = m.market_last_min;
+    if (
+      ml != null &&
+      Number.isFinite(ml) &&
+      mf != null &&
+      Number.isFinite(mf) &&
+      mf > 0
+    ) {
+      bullets.push(
+        "Ninguna tienda del primer día (ni una alternativa más cara ese día con dato reciente, ni la del último relevamiento más barato) llegó a armar una serie por tienda coherente. Mostramos solo la lectura entre todas las tiendas.",
+      );
+    }
+    return { bullets, flags };
+  }
 
   if (!(m.w_max > 0) || !(m.w_median > 0) || m.n_points < 2) {
     return { bullets, flags };

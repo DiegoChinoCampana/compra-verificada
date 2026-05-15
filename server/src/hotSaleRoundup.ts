@@ -14,16 +14,21 @@ export type HotSaleTrendRow = {
   article: string;
   brand: string | null;
   detail: string | null;
+  /**
+   * La tienda ancla tiene al menos un precio del mismo producto en los últimos 7 días
+   * respecto del último día con dato del mercado; si no, no mostramos tendencia por ancla.
+   */
+  anchor_fresh: boolean;
   /** Tienda normalizada usada como ancla (la del listado más barato del primer día con ese clúster). */
   trend_seller: string | null;
-  first_min: number;
-  last_min: number;
-  trend_pct: number;
-  n_points: number;
-  w_min: number;
-  w_max: number;
-  w_median: number;
-  max_dod_drop_pct: number;
+  first_min: number | null;
+  last_min: number | null;
+  trend_pct: number | null;
+  n_points: number | null;
+  w_min: number | null;
+  w_max: number | null;
+  w_median: number | null;
+  max_dod_drop_pct: number | null;
   market_first_min: number;
   market_last_min: number;
   market_trend_pct: number;
@@ -36,6 +41,10 @@ export type HotSaleTrendRow = {
   market_last_at: string | null;
   /** Vendedor del listado más barato en ese último relevamiento mercado. */
   market_last_cheapest_seller: string | null;
+  /** Origen de la tienda ancla: primer día (1º u otra opción fresca) o último relevamiento mercado. */
+  anchor_source: string | null;
+  /** Si `anchor_source` es del primer día: 1 = más barato ese día. */
+  anchor_first_day_rank: number | null;
   narrative: HotSaleNarrative;
 };
 
@@ -70,6 +79,11 @@ export type HotSaleVotedPayloadRow = {
   market_w_max: number | null;
   market_w_median: number | null;
   market_max_dod_drop_pct: number | null;
+  /** false si la tienda ancla no tiene datos recientes (ver regla de 7 días en SQL). */
+  anchor_fresh?: boolean | null;
+  /** first_day_cheapest | first_day_alt | last_run_cheapest */
+  anchor_source?: string | null;
+  anchor_first_day_rank?: number | null;
   narrative: HotSaleNarrative | null;
 };
 
@@ -153,17 +167,92 @@ first_run_for_article AS (
     AND length(trim(${sqlProductGroupingKey("r")})) > 0
   ORDER BY d.search_id, d.executed_at ASC
 ),
-anchor_seller AS (
-  SELECT DISTINCT ON (fr.search_id)
+run_mins_market AS (
+  SELECT d.search_id, d.scrape_run_id, d.executed_at, MIN(r.price)::float8 AS min_price
+  FROM runs_one_per_day d
+  INNER JOIN canonical_per_article ck ON ck.search_id = d.search_id
+  INNER JOIN results r ON r.search_id = d.search_id AND r.scrape_run_id = d.scrape_run_id
+  WHERE r.price IS NOT NULL AND r.price > 0
+    AND ${sqlWhereRespectClusterWhenPresent("r")}
+    AND ${sqlProductGroupingKey("r")} = ck.canonical_gk
+  GROUP BY d.search_id, d.scrape_run_id, d.executed_at
+),
+market_last_point AS (
+  SELECT DISTINCT ON (search_id)
+    search_id,
+    scrape_run_id AS last_market_run_id,
+    executed_at AS last_market_at
+  FROM run_mins_market
+  ORDER BY search_id, executed_at DESC
+),
+first_day_seller_mins AS (
+  SELECT
     fr.search_id,
-    ${sqlNormSeller("r")} AS seller_key
+    (${sqlNormSeller("r")}) AS seller_key,
+    MIN(r.price)::float8 AS day_min_price
   FROM first_run_for_article fr
   INNER JOIN canonical_per_article ck ON ck.search_id = fr.search_id
   INNER JOIN results r ON r.search_id = fr.search_id AND r.scrape_run_id = fr.scrape_run_id
   WHERE r.price IS NOT NULL AND r.price > 0
     AND ${sqlWhereRespectClusterWhenPresent("r")}
     AND ${sqlProductGroupingKey("r")} = ck.canonical_gk
-  ORDER BY fr.search_id, r.price ASC NULLS LAST, r.id ASC
+  GROUP BY fr.search_id, (${sqlNormSeller("r")})
+),
+first_day_offers AS (
+  SELECT
+    search_id,
+    seller_key,
+    ROW_NUMBER() OVER (PARTITION BY search_id ORDER BY day_min_price ASC NULLS LAST, seller_key ASC) AS price_rank
+  FROM first_day_seller_mins
+),
+anchor_from_first_day AS (
+  SELECT DISTINCT ON (f.search_id)
+    f.search_id,
+    f.seller_key,
+    f.price_rank::int AS anchor_first_day_rank
+  FROM first_day_offers f
+  INNER JOIN market_last_point lm ON lm.search_id = f.search_id
+  WHERE EXISTS (
+    SELECT 1
+    FROM runs_one_per_day d
+    INNER JOIN canonical_per_article ck2 ON ck2.search_id = d.search_id
+    INNER JOIN results r2 ON r2.search_id = d.search_id AND r2.scrape_run_id = d.scrape_run_id
+    WHERE d.search_id = f.search_id
+      AND r2.price IS NOT NULL AND r2.price > 0
+      AND ${sqlWhereRespectClusterWhenPresent("r2")}
+      AND ${sqlProductGroupingKey("r2")} = ck2.canonical_gk
+      AND (${sqlNormSeller("r2")}) = f.seller_key
+      AND d.executed_at >= lm.last_market_at - interval '7 days'
+  )
+  ORDER BY f.search_id, f.price_rank ASC
+),
+fallback_last_run_anchor AS (
+  SELECT DISTINCT ON (m.search_id)
+    m.search_id,
+    (${sqlNormSeller("r")}) AS seller_key
+  FROM market_last_point m
+  INNER JOIN canonical_per_article ck ON ck.search_id = m.search_id
+  INNER JOIN results r ON r.search_id = m.search_id AND r.scrape_run_id = m.last_market_run_id
+  WHERE r.price IS NOT NULL AND r.price > 0
+    AND ${sqlWhereRespectClusterWhenPresent("r")}
+    AND ${sqlProductGroupingKey("r")} = ck.canonical_gk
+  ORDER BY m.search_id, r.price ASC NULLS LAST, r.id ASC
+),
+anchor_seller AS (
+  SELECT
+    s.search_id,
+    COALESCE(a.seller_key, f.seller_key) AS seller_key,
+    CASE
+      WHEN a.seller_key IS NOT NULL AND a.anchor_first_day_rank = 1 THEN 'first_day_cheapest'
+      WHEN a.seller_key IS NOT NULL THEN 'first_day_alt'
+      WHEN f.seller_key IS NOT NULL THEN 'last_run_cheapest'
+      ELSE NULL
+    END AS anchor_source,
+    a.anchor_first_day_rank
+  FROM (SELECT DISTINCT search_id FROM first_run_for_article) s
+  LEFT JOIN anchor_from_first_day a ON a.search_id = s.search_id
+  LEFT JOIN fallback_last_run_anchor f ON f.search_id = s.search_id AND a.seller_key IS NULL
+  WHERE COALESCE(a.seller_key, f.seller_key) IS NOT NULL
 ),
 run_mins AS (
   SELECT d.search_id, d.scrape_run_id, d.executed_at, MIN(r.price)::float8 AS min_price
@@ -174,17 +263,7 @@ run_mins AS (
   WHERE r.price IS NOT NULL AND r.price > 0
     AND ${sqlWhereRespectClusterWhenPresent("r")}
     AND ${sqlProductGroupingKey("r")} = ck.canonical_gk
-    AND ${sqlNormSeller("r")} = an.seller_key
-  GROUP BY d.search_id, d.scrape_run_id, d.executed_at
-),
-run_mins_market AS (
-  SELECT d.search_id, d.scrape_run_id, d.executed_at, MIN(r.price)::float8 AS min_price
-  FROM runs_one_per_day d
-  INNER JOIN canonical_per_article ck ON ck.search_id = d.search_id
-  INNER JOIN results r ON r.search_id = d.search_id AND r.scrape_run_id = d.scrape_run_id
-  WHERE r.price IS NOT NULL AND r.price > 0
-    AND ${sqlWhereRespectClusterWhenPresent("r")}
-    AND ${sqlProductGroupingKey("r")} = ck.canonical_gk
+    AND (${sqlNormSeller("r")}) = an.seller_key
   GROUP BY d.search_id, d.scrape_run_id, d.executed_at
 ),
 daily AS (
@@ -233,6 +312,7 @@ ends AS (
   SELECT search_id,
     MAX(min_price) FILTER (WHERE rn_first = 1) AS first_min,
     MAX(min_price) FILTER (WHERE rn_last = 1) AS last_min,
+    MAX(executed_at) FILTER (WHERE rn_last = 1) AS last_anchor_at,
     COUNT(*)::int AS n_points
   FROM ordered
   GROUP BY search_id
@@ -243,6 +323,7 @@ trends_anchor AS (
     e.search_id AS article_id,
     e.first_min,
     e.last_min,
+    e.last_anchor_at,
     e.n_points,
     CASE WHEN e.first_min > 0 THEN ((e.last_min - e.first_min) / e.first_min)::float8 END AS trend_pct,
     ws.w_min,
@@ -324,19 +405,22 @@ trends_market AS (
   INNER JOIN dod_stats_market ds ON ds.search_id = e.search_id
 )
 SELECT
-  ta.article_id,
+  tm.article_id,
   a.article,
   a.brand,
   a.detail,
-  an.seller_key::text AS trend_seller,
-  ta.first_min::float8,
-  ta.last_min::float8,
-  ta.trend_pct::float8,
-  ta.n_points,
-  ta.w_min::float8,
-  ta.w_max::float8,
-  ta.w_median::float8,
-  ta.max_dod_drop_pct::float8,
+  (ta.article_id IS NOT NULL) AS anchor_fresh,
+  CASE WHEN ta.article_id IS NOT NULL THEN an.seller_key::text ELSE NULL END AS trend_seller,
+  an.anchor_source::text AS anchor_source,
+  an.anchor_first_day_rank::int AS anchor_first_day_rank,
+  ta.first_min::float8 AS first_min,
+  ta.last_min::float8 AS last_min,
+  ta.trend_pct::float8 AS trend_pct,
+  ta.n_points AS n_points,
+  ta.w_min::float8 AS w_min,
+  ta.w_max::float8 AS w_max,
+  ta.w_median::float8 AS w_median,
+  ta.max_dod_drop_pct::float8 AS max_dod_drop_pct,
   tm.first_min::float8 AS market_first_min,
   tm.last_min::float8 AS market_last_min,
   tm.trend_pct::float8 AS market_trend_pct,
@@ -350,7 +434,7 @@ SELECT
     SELECT (${sqlNormSeller("r")})::text
     FROM results r
     INNER JOIN canonical_per_article ck ON ck.search_id = r.search_id
-    WHERE r.search_id = ta.article_id
+    WHERE r.search_id = tm.article_id
       AND r.scrape_run_id = tm.last_market_run_id
       AND r.price IS NOT NULL AND r.price > 0
       AND ${sqlWhereRespectClusterWhenPresent("r")}
@@ -359,10 +443,11 @@ SELECT
     ORDER BY r.id ASC
     LIMIT 1
   ) AS market_last_cheapest_seller
-FROM trends_anchor ta
-INNER JOIN trends_market tm ON tm.article_id = ta.article_id
-INNER JOIN articles a ON a.id = ta.article_id AND a.enabled = TRUE
-INNER JOIN anchor_seller an ON an.search_id = ta.article_id
+FROM trends_market tm
+INNER JOIN articles a ON a.id = tm.article_id AND a.enabled = TRUE
+INNER JOIN anchor_seller an ON an.search_id = tm.article_id
+LEFT JOIN trends_anchor ta ON ta.article_id = tm.article_id
+  AND ta.last_anchor_at >= tm.last_market_at - interval '7 days'
 `;
 
 function parseDays(raw: unknown): number {
@@ -372,14 +457,20 @@ function parseDays(raw: unknown): number {
 
 function rowToTrendPayload(r: Record<string, unknown>): HotSaleTrendRow {
   const id = Number(r.article_id);
-  const first_min = Number(r.first_min);
-  const last_min = Number(r.last_min);
-  const trend_pct = Number(r.trend_pct);
-  const n_points = Number(r.n_points);
-  const w_min = Number(r.w_min);
-  const w_max = Number(r.w_max);
-  const w_median = Number(r.w_median);
-  const max_dod_drop_pct = Number(r.max_dod_drop_pct);
+  const anchor_fresh = r.anchor_fresh === true;
+  const numOrNull = (v: unknown): number | null => {
+    if (v == null) return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  };
+  const first_min = numOrNull(r.first_min);
+  const last_min = numOrNull(r.last_min);
+  const trend_pct = numOrNull(r.trend_pct);
+  const n_points = numOrNull(r.n_points);
+  const w_min = numOrNull(r.w_min);
+  const w_max = numOrNull(r.w_max);
+  const w_median = numOrNull(r.w_median);
+  const max_dod_drop_pct = numOrNull(r.max_dod_drop_pct);
   const market_first_min = Number(r.market_first_min);
   const market_last_min = Number(r.market_last_min);
   const market_trend_pct = Number(r.market_trend_pct);
@@ -401,24 +492,32 @@ function rowToTrendPayload(r: Record<string, unknown>): HotSaleTrendRow {
   const mlcs = r.market_last_cheapest_seller;
   const market_last_cheapest_seller =
     mlcs == null || String(mlcs).trim() === "" ? null : String(mlcs);
+  const asrc = r.anchor_source;
+  const anchor_source =
+    asrc == null || String(asrc).trim() === "" ? null : String(asrc);
+  const afr = r.anchor_first_day_rank;
+  const anchor_first_day_rank =
+    afr == null || !Number.isFinite(Number(afr)) ? null : Number(afr);
   const narrative = buildHotSaleNarrative({
-    first_min,
-    last_min,
-    w_max,
-    w_median,
-    max_dod_drop_pct,
-    n_points,
+    first_min: first_min ?? 0,
+    last_min: last_min ?? 0,
+    w_max: w_max ?? 0,
+    w_median: w_median ?? 0,
+    max_dod_drop_pct: max_dod_drop_pct ?? 0,
+    n_points: n_points ?? 0,
     market_first_min:
       Number.isFinite(market_first_min) && market_first_min > 0 ? market_first_min : null,
     market_last_min:
       Number.isFinite(market_last_min) && market_last_min > 0 ? market_last_min : null,
     market_trend_pct: Number.isFinite(market_trend_pct) ? market_trend_pct : null,
+    anchor_fresh,
   });
   return {
     article_id: id,
     article: String(r.article ?? ""),
     brand: r.brand == null ? null : String(r.brand),
     detail: r.detail == null ? null : String(r.detail),
+    anchor_fresh,
     trend_seller,
     first_min,
     last_min,
@@ -438,6 +537,8 @@ function rowToTrendPayload(r: Record<string, unknown>): HotSaleTrendRow {
     market_max_dod_drop_pct,
     market_last_at,
     market_last_cheapest_seller,
+    anchor_source,
+    anchor_first_day_rank,
     narrative,
   };
 }
@@ -567,6 +668,9 @@ function buildVotedRows(
         market_w_max: null,
         market_w_median: null,
         market_max_dod_drop_pct: null,
+        anchor_fresh: null,
+        anchor_source: null,
+        anchor_first_day_rank: null,
         narrative: null,
       };
     }
@@ -600,6 +704,9 @@ function buildVotedRows(
         market_w_max: null,
         market_w_median: null,
         market_max_dod_drop_pct: null,
+        anchor_fresh: null,
+        anchor_source: null,
+        anchor_first_day_rank: null,
         narrative: null,
       };
     }
@@ -630,6 +737,9 @@ function buildVotedRows(
       market_w_max: t.market_w_max,
       market_w_median: t.market_w_median,
       market_max_dod_drop_pct: t.market_max_dod_drop_pct,
+      anchor_fresh: t.anchor_fresh,
+      anchor_source: t.anchor_source,
+      anchor_first_day_rank: t.anchor_first_day_rank,
       narrative: t.narrative,
     };
   });
@@ -642,8 +752,8 @@ function pickTopDrops(
   limit: number,
 ): HotSaleTrendRow[] {
   return allRows
-    .filter((r) => !votedIds.has(r.article_id) && r.trend_pct < 0)
-    .sort((a, b) => a.trend_pct - b.trend_pct)
+    .filter((r) => !votedIds.has(r.article_id) && r.trend_pct != null && r.trend_pct < 0)
+    .sort((a, b) => (a.trend_pct ?? 0) - (b.trend_pct ?? 0))
     .slice(0, limit);
 }
 
@@ -673,7 +783,7 @@ export async function fetchHotSaleTrendRowForArticle(
 ): Promise<HotSaleTrendRow | null> {
   if (!Number.isInteger(articleId) || articleId <= 0) return null;
   const days = parseDays(queryDays);
-  const sql = `${TRENDS_SQL}\nWHERE ta.article_id = $2::int`;
+  const sql = `${TRENDS_SQL}\nWHERE tm.article_id = $2::int`;
   const { rows } = await pool.query(sql, [days, articleId]);
   const r = rows[0] as Record<string, unknown> | undefined;
   if (!r) return null;

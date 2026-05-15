@@ -30,13 +30,38 @@ function trendPhrase(pct: number | null): string | null {
   return "En esa misma tienda, el precio se mantuvo bastante estable en el período.";
 }
 
-function trendSellerCaption(seller: string | null | undefined): string | null {
+function MarketOnlyBecauseAnchorStaleNote() {
+  return (
+    <p className="muted small" style={{ maxWidth: "22rem", marginTop: "0.35rem" }}>
+      La tienda más barata al <strong>primer día</strong> no tiene precios del mismo producto en los{" "}
+      <strong>últimos 7 días</strong> (respecto del último relevamiento entre todas las tiendas). Mostramos solo{" "}
+      <strong>todas las tiendas</strong>; la fila por tienda ancla sería engañosa.
+    </p>
+  );
+}
+
+function trendSellerCaption(
+  seller: string | null | undefined,
+  anchorSource?: string | null,
+  _anchorFirstDayRank?: number | null,
+): string | null {
   if (seller == null || !String(seller).trim()) return null;
   const s = String(seller).trim();
+  const tail =
+    " Si otra tienda bajó más el mismo producto, eso se ve en «Todas las tiendas» debajo.";
   if (s.toLowerCase() === "(sin tienda)") {
-    return "Para la ancla usamos solo publicaciones del primer día sin nombre de tienda en el scrape (mismo producto). Si hay un mejor precio con otra tienda, figura en «Todas las tiendas» debajo.";
+    if (anchorSource === "last_run_cheapest") {
+      return `Ancla sin nombre de tienda en el dato, tomada del último relevamiento entre todas las tiendas (no hubo candidato del primer día con precio reciente).${tail}`;
+    }
+    return `Para la ancla usamos publicaciones del primer día sin nombre de tienda en el scrape (mismo producto).${tail}`;
   }
-  return `Tendencia principal solo para «${s}» (listado más barato el primer día). Si otra tienda bajó más el mismo producto, eso se ve en «Todas las tiendas» debajo.`;
+  if (anchorSource === "first_day_alt") {
+    return `Tendencia para «${s}»: es la opción más barata el primer día de la ventana entre las tiendas que sí tienen precio del mismo producto en los últimos 7 días (respecto del último relevamiento general); otras más baratas ese día no actualizaron.${tail}`;
+  }
+  if (anchorSource === "last_run_cheapest") {
+    return `Tendencia para «${s}»: listado más barato en el último relevamiento entre todas las tiendas; ninguna tienda del primer día tenía precio reciente del mismo producto.${tail}`;
+  }
+  return `Tendencia principal solo para «${s}» (listado más barato el primer día).${tail}`;
 }
 
 function NarrativeBlock({ narrative }: { narrative: HotSaleNarrativePayload | null | undefined }) {
@@ -280,8 +305,11 @@ export function HotSaleRoundupPage() {
               </p>
             ) : null}
             <p className="muted small">
-              La fila principal es la <strong>tienda del primer día</strong>. Debajo, cuando hay datos, aparece la lectura
-              entre <strong>todas las tiendas</strong> del mismo producto (mejor precio del día sin importar vendedor).
+              La fila principal sigue a <strong>una</strong> tienda: la más barata el primer día que sigue publicando el
+              mismo producto en los <strong>últimos 7 días</strong> (respecto del último relevamiento general); si ninguna
+              califica, usamos la del listado más barato en ese último relevamiento. Si tampoco alcanza para una serie
+              clara, solo mostramos <strong>todas las tiendas</strong>. Debajo va el mejor precio por día entre cualquier
+              vendedor (mismo producto).
             </p>
             <div className="table-wrap">
               <table className="table">
@@ -341,12 +369,12 @@ export function HotSaleRoundupPage() {
                         )}
                       </td>
                       <td>
-                        {r.trend_pct != null ? (
+                        {r.trend_pct != null && r.anchor_fresh !== false ? (
                           <>
                             <span title="Primer vs último mínimo en la ventana">{fmtPct(r.trend_pct)}</span>
                             <div className="muted small">{trendPhrase(r.trend_pct)}</div>
                             {(() => {
-                              const c = trendSellerCaption(r.trend_seller);
+                              const c = trendSellerCaption(r.trend_seller, r.anchor_source, r.anchor_first_day_rank);
                               return c ? <div className="muted small">{c}</div> : null;
                             })()}
                             <div className="muted small">
@@ -358,6 +386,19 @@ export function HotSaleRoundupPage() {
                               w_max={r.w_max}
                               max_dod_drop_pct={r.max_dod_drop_pct}
                             />
+                            <MarketAllStoresBlock
+                              trend_pct={r.market_trend_pct}
+                              first_min={r.market_first_min}
+                              last_min={r.market_last_min}
+                              w_min={r.market_w_min}
+                              w_median={r.market_w_median}
+                              w_max={r.market_w_max}
+                            />
+                            <NarrativeBlock narrative={r.narrative} />
+                          </>
+                        ) : r.articleId != null && r.linked && r.market_last_min != null ? (
+                          <>
+                            <MarketOnlyBecauseAnchorStaleNote />
                             <MarketAllStoresBlock
                               trend_pct={r.market_trend_pct}
                               first_min={r.market_first_min}
@@ -423,7 +464,7 @@ export function HotSaleRoundupPage() {
                           <strong>{fmtPct(r.trend_pct)}</strong>
                           <div className="muted small">{trendPhrase(r.trend_pct)}</div>
                           {(() => {
-                            const c = trendSellerCaption(r.trend_seller);
+                            const c = trendSellerCaption(r.trend_seller, r.anchor_source, r.anchor_first_day_rank);
                             return c ? <div className="muted small">{c}</div> : null;
                           })()}
                           <WindowRangeLine

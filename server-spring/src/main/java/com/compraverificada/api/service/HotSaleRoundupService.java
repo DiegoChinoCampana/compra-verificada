@@ -35,8 +35,10 @@ public class HotSaleRoundupService {
         return TRENDS_SQL_TEMPLATE
                 .replace("/*GK*/", SqlSnippets.productGroupingKey("r"))
                 .replace("/*CF*/", " AND " + SqlSnippets.whereRespectClusterWhenPresent("r"))
-                .replace("/*SK*/", SqlSnippets.normSeller("r"));
-
+                .replace("/*SK*/", SqlSnippets.normSeller("r"))
+                .replace("/*GK2*/", SqlSnippets.productGroupingKey("r2"))
+                .replace("/*CF2*/", " AND " + SqlSnippets.whereRespectClusterWhenPresent("r2"))
+                .replace("/*SK2*/", SqlSnippets.normSeller("r2"));
     }
 
     private static final String TRENDS_SQL_TEMPLATE = """
@@ -109,16 +111,88 @@ public class HotSaleRoundupService {
                 AND length(trim(/*GK*/)) > 0
               ORDER BY d.search_id, d.executed_at ASC
             ),
-            anchor_seller AS (
-              SELECT DISTINCT ON (fr.search_id)
+            run_mins_market AS (
+              SELECT d.search_id, d.scrape_run_id, d.executed_at, MIN(r.price)::float8 AS min_price
+              FROM runs_one_per_day d
+              INNER JOIN canonical_per_article ck ON ck.search_id = d.search_id
+              INNER JOIN results r ON r.search_id = d.search_id AND r.scrape_run_id = d.scrape_run_id
+              WHERE r.price IS NOT NULL AND r.price > 0/*CF*/
+                AND /*GK*/ = ck.canonical_gk
+              GROUP BY d.search_id, d.scrape_run_id, d.executed_at
+            ),
+            market_last_point AS (
+              SELECT DISTINCT ON (search_id)
+                search_id,
+                scrape_run_id AS last_market_run_id,
+                executed_at AS last_market_at
+              FROM run_mins_market
+              ORDER BY search_id, executed_at DESC
+            ),
+            first_day_seller_mins AS (
+              SELECT
                 fr.search_id,
-                /*SK*/ AS seller_key
+                (/*SK*/) AS seller_key,
+                MIN(r.price)::float8 AS day_min_price
               FROM first_run_for_article fr
               INNER JOIN canonical_per_article ck ON ck.search_id = fr.search_id
               INNER JOIN results r ON r.search_id = fr.search_id AND r.scrape_run_id = fr.scrape_run_id
               WHERE r.price IS NOT NULL AND r.price > 0/*CF*/
                 AND /*GK*/ = ck.canonical_gk
-              ORDER BY fr.search_id, r.price ASC NULLS LAST, r.id ASC
+              GROUP BY fr.search_id, (/*SK*/)
+            ),
+            first_day_offers AS (
+              SELECT
+                search_id,
+                seller_key,
+                ROW_NUMBER() OVER (PARTITION BY search_id ORDER BY day_min_price ASC NULLS LAST, seller_key ASC) AS price_rank
+              FROM first_day_seller_mins
+            ),
+            anchor_from_first_day AS (
+              SELECT DISTINCT ON (f.search_id)
+                f.search_id,
+                f.seller_key,
+                f.price_rank::int AS anchor_first_day_rank
+              FROM first_day_offers f
+              INNER JOIN market_last_point lm ON lm.search_id = f.search_id
+              WHERE EXISTS (
+                SELECT 1
+                FROM runs_one_per_day d
+                INNER JOIN canonical_per_article ck2 ON ck2.search_id = d.search_id
+                INNER JOIN results r2 ON r2.search_id = d.search_id AND r2.scrape_run_id = d.scrape_run_id
+                WHERE d.search_id = f.search_id
+                  AND r2.price IS NOT NULL AND r2.price > 0/*CF2*/
+                  AND /*GK2*/ = ck2.canonical_gk
+                  AND (/*SK2*/) = f.seller_key
+                  AND d.executed_at >= lm.last_market_at - interval '7 days'
+              )
+              ORDER BY f.search_id, f.price_rank ASC
+            ),
+            fallback_last_run_anchor AS (
+              SELECT DISTINCT ON (m.search_id)
+                m.search_id,
+                (/*SK*/) AS seller_key
+              FROM market_last_point m
+              INNER JOIN canonical_per_article ck ON ck.search_id = m.search_id
+              INNER JOIN results r ON r.search_id = m.search_id AND r.scrape_run_id = m.last_market_run_id
+              WHERE r.price IS NOT NULL AND r.price > 0/*CF*/
+                AND /*GK*/ = ck.canonical_gk
+              ORDER BY m.search_id, r.price ASC NULLS LAST, r.id ASC
+            ),
+            anchor_seller AS (
+              SELECT
+                s.search_id,
+                COALESCE(a.seller_key, f.seller_key) AS seller_key,
+                CASE
+                  WHEN a.seller_key IS NOT NULL AND a.anchor_first_day_rank = 1 THEN 'first_day_cheapest'
+                  WHEN a.seller_key IS NOT NULL THEN 'first_day_alt'
+                  WHEN f.seller_key IS NOT NULL THEN 'last_run_cheapest'
+                  ELSE NULL
+                END AS anchor_source,
+                a.anchor_first_day_rank
+              FROM (SELECT DISTINCT search_id FROM first_run_for_article) s
+              LEFT JOIN anchor_from_first_day a ON a.search_id = s.search_id
+              LEFT JOIN fallback_last_run_anchor f ON f.search_id = s.search_id AND a.seller_key IS NULL
+              WHERE COALESCE(a.seller_key, f.seller_key) IS NOT NULL
             ),
             run_mins AS (
               SELECT d.search_id, d.scrape_run_id, d.executed_at, MIN(r.price)::float8 AS min_price
@@ -128,16 +202,7 @@ public class HotSaleRoundupService {
               INNER JOIN results r ON r.search_id = d.search_id AND r.scrape_run_id = d.scrape_run_id
               WHERE r.price IS NOT NULL AND r.price > 0/*CF*/
                 AND /*GK*/ = ck.canonical_gk
-                AND /*SK*/ = an.seller_key
-              GROUP BY d.search_id, d.scrape_run_id, d.executed_at
-            ),
-            run_mins_market AS (
-              SELECT d.search_id, d.scrape_run_id, d.executed_at, MIN(r.price)::float8 AS min_price
-              FROM runs_one_per_day d
-              INNER JOIN canonical_per_article ck ON ck.search_id = d.search_id
-              INNER JOIN results r ON r.search_id = d.search_id AND r.scrape_run_id = d.scrape_run_id
-              WHERE r.price IS NOT NULL AND r.price > 0/*CF*/
-                AND /*GK*/ = ck.canonical_gk
+                AND (/*SK*/) = an.seller_key
               GROUP BY d.search_id, d.scrape_run_id, d.executed_at
             ),
             daily AS (
@@ -183,13 +248,14 @@ public class HotSaleRoundupService {
               SELECT search_id,
                 MAX(min_price) FILTER (WHERE rn_first = 1) AS first_min,
                 MAX(min_price) FILTER (WHERE rn_last = 1) AS last_min,
+                MAX(executed_at) FILTER (WHERE rn_last = 1) AS last_anchor_at,
                 COUNT(*)::int AS n_points
               FROM ordered
               GROUP BY search_id
               HAVING COUNT(*) >= 2
             ),
             trends_anchor AS (
-              SELECT e.search_id AS article_id, e.first_min, e.last_min, e.n_points,
+              SELECT e.search_id AS article_id, e.first_min, e.last_min, e.last_anchor_at, e.n_points,
                 CASE WHEN e.first_min > 0 THEN ((e.last_min - e.first_min) / e.first_min)::float8 END AS trend_pct,
                 ws.w_min, ws.w_max, ws.w_median, ds.max_dod_drop_pct
               FROM ends e
@@ -261,19 +327,22 @@ public class HotSaleRoundupService {
               INNER JOIN dod_stats_market ds ON ds.search_id = e.search_id
             )
             SELECT
-              ta.article_id,
+              tm.article_id,
               a.article,
               a.brand,
               a.detail,
-              an.seller_key::text AS trend_seller,
-              ta.first_min::float8,
-              ta.last_min::float8,
-              ta.trend_pct::float8,
-              ta.n_points,
-              ta.w_min::float8,
-              ta.w_max::float8,
-              ta.w_median::float8,
-              ta.max_dod_drop_pct::float8,
+              (ta.article_id IS NOT NULL) AS anchor_fresh,
+              CASE WHEN ta.article_id IS NOT NULL THEN an.seller_key::text ELSE NULL END AS trend_seller,
+              an.anchor_source::text AS anchor_source,
+              an.anchor_first_day_rank::int AS anchor_first_day_rank,
+              ta.first_min::float8 AS first_min,
+              ta.last_min::float8 AS last_min,
+              ta.trend_pct::float8 AS trend_pct,
+              ta.n_points AS n_points,
+              ta.w_min::float8 AS w_min,
+              ta.w_max::float8 AS w_max,
+              ta.w_median::float8 AS w_median,
+              ta.max_dod_drop_pct::float8 AS max_dod_drop_pct,
               tm.first_min::float8 AS market_first_min,
               tm.last_min::float8 AS market_last_min,
               tm.trend_pct::float8 AS market_trend_pct,
@@ -287,7 +356,7 @@ public class HotSaleRoundupService {
                 SELECT (/*SK*/)::text
                 FROM results r
                 INNER JOIN canonical_per_article ck ON ck.search_id = r.search_id
-                WHERE r.search_id = ta.article_id
+                WHERE r.search_id = tm.article_id
                   AND r.scrape_run_id = tm.last_market_run_id
                   AND r.price IS NOT NULL AND r.price > 0/*CF*/
                   AND /*GK*/ = ck.canonical_gk
@@ -295,10 +364,11 @@ public class HotSaleRoundupService {
                 ORDER BY r.id ASC
                 LIMIT 1
               ) AS market_last_cheapest_seller
-            FROM trends_anchor ta
-            INNER JOIN trends_market tm ON tm.article_id = ta.article_id
-            INNER JOIN articles a ON a.id = ta.article_id AND a.enabled = TRUE
-            INNER JOIN anchor_seller an ON an.search_id = ta.article_id
+            FROM trends_market tm
+            INNER JOIN articles a ON a.id = tm.article_id AND a.enabled = TRUE
+            INNER JOIN anchor_seller an ON an.search_id = tm.article_id
+            LEFT JOIN trends_anchor ta ON ta.article_id = tm.article_id
+              AND ta.last_anchor_at >= tm.last_market_at - interval '7 days'
             """;
 
     private record ArticleMatch(String articleFrag, String brandFrag, String detailFrag) {
@@ -356,7 +426,7 @@ public class HotSaleRoundupService {
             return null;
         }
         int d = parseDays(days);
-        String sql = trendsSql() + "\nWHERE ta.article_id = :articleId";
+        String sql = trendsSql() + "\nWHERE tm.article_id = :articleId";
         MapSqlParameterSource p = new MapSqlParameterSource()
                 .addValue("days", d)
                 .addValue("articleId", articleId);
@@ -577,16 +647,19 @@ public class HotSaleRoundupService {
     }
 
     private static Map<String, Object> buildNarrativeFromSqlRow(Map<String, Object> row) {
-        double firstMin = ((Number) row.get("first_min")).doubleValue();
-        double lastMin = ((Number) row.get("last_min")).doubleValue();
-        int nPoints = ((Number) row.get("n_points")).intValue();
-        double wMax = ((Number) row.get("w_max")).doubleValue();
-        double wMedian = ((Number) row.get("w_median")).doubleValue();
-        double maxDod = ((Number) row.get("max_dod_drop_pct")).doubleValue();
+        Object af = row.get("anchor_fresh");
+        boolean anchorFresh = af == null || Boolean.TRUE.equals(af);
+
+        double firstMin = row.get("first_min") instanceof Number n ? n.doubleValue() : 0;
+        double lastMin = row.get("last_min") instanceof Number n ? n.doubleValue() : 0;
+        int nPoints = row.get("n_points") instanceof Number n ? n.intValue() : 0;
+        double wMax = row.get("w_max") instanceof Number n ? n.doubleValue() : 0;
+        double wMedian = row.get("w_median") instanceof Number n ? n.doubleValue() : 0;
+        double maxDod = row.get("max_dod_drop_pct") instanceof Number n ? n.doubleValue() : 0;
         Double mf = row.get("market_first_min") instanceof Number n ? n.doubleValue() : null;
         Double ml = row.get("market_last_min") instanceof Number n ? n.doubleValue() : null;
         Double mt = row.get("market_trend_pct") instanceof Number n ? n.doubleValue() : null;
-        return HotSaleNarrative.build(firstMin, lastMin, wMax, wMedian, maxDod, nPoints, mf, ml, mt);
+        return HotSaleNarrative.build(firstMin, lastMin, wMax, wMedian, maxDod, nPoints, mf, ml, mt, anchorFresh);
     }
 
     private static Map<String, Object> toDropPayload(Map<String, Object> row) {
@@ -595,6 +668,7 @@ public class HotSaleRoundupService {
         m.put("article", row.get("article"));
         m.put("brand", row.get("brand"));
         m.put("detail", row.get("detail"));
+        m.put("anchor_fresh", row.get("anchor_fresh"));
         m.put("first_min", row.get("first_min"));
         m.put("last_min", row.get("last_min"));
         m.put("trend_pct", row.get("trend_pct"));
@@ -604,6 +678,8 @@ public class HotSaleRoundupService {
         m.put("w_median", row.get("w_median"));
         m.put("max_dod_drop_pct", row.get("max_dod_drop_pct"));
         m.put("trend_seller", row.get("trend_seller"));
+        m.put("anchor_source", row.get("anchor_source"));
+        m.put("anchor_first_day_rank", row.get("anchor_first_day_rank"));
         m.put("market_first_min", row.get("market_first_min"));
         m.put("market_last_min", row.get("market_last_min"));
         m.put("market_trend_pct", row.get("market_trend_pct"));
@@ -671,6 +747,9 @@ public class HotSaleRoundupService {
             m.put("market_w_max", null);
             m.put("market_w_median", null);
             m.put("market_max_dod_drop_pct", null);
+            m.put("anchor_fresh", null);
+            m.put("anchor_source", null);
+            m.put("anchor_first_day_rank", null);
             m.put("narrative", null);
             return m;
         }
@@ -698,6 +777,9 @@ public class HotSaleRoundupService {
             m.put("market_w_max", null);
             m.put("market_w_median", null);
             m.put("market_max_dod_drop_pct", null);
+            m.put("anchor_fresh", null);
+            m.put("anchor_source", null);
+            m.put("anchor_first_day_rank", null);
             m.put("narrative", null);
             return m;
         }
@@ -722,6 +804,9 @@ public class HotSaleRoundupService {
         m.put("market_w_max", t.get("market_w_max"));
         m.put("market_w_median", t.get("market_w_median"));
         m.put("market_max_dod_drop_pct", t.get("market_max_dod_drop_pct"));
+        m.put("anchor_fresh", t.get("anchor_fresh"));
+        m.put("anchor_source", t.get("anchor_source"));
+        m.put("anchor_first_day_rank", t.get("anchor_first_day_rank"));
         m.put("narrative", buildNarrativeFromSqlRow(t));
         return m;
     }

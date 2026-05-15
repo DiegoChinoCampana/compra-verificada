@@ -25,7 +25,8 @@ public final class HotSaleNarrative {
             int nPoints,
             Double marketFirstMin,
             Double marketLastMin,
-            Double marketTrendPct) {
+            Double marketTrendPct,
+            boolean anchorFresh) {
         List<String> bullets = new ArrayList<>();
         Map<String, Object> flags = new LinkedHashMap<>();
 
@@ -33,6 +34,24 @@ public final class HotSaleNarrative {
         boolean lastBelowMedian = false;
         boolean lastAboveMedian = false;
         boolean sharpDrop = false;
+
+        if (!anchorFresh) {
+            if (marketLastMin != null
+                    && marketFirstMin != null
+                    && marketLastMin > 0
+                    && marketFirstMin > 0) {
+                bullets.add(
+                        "Ninguna tienda del primer día (ni una alternativa con dato reciente, ni la del último relevamiento más barato) armó una serie por tienda coherente. Mostramos solo la lectura entre todas las tiendas.");
+            }
+            flags.put("possibleInflatedAnchor", false);
+            flags.put("lastBelowWindowMedian", false);
+            flags.put("lastAboveWindowMedian", false);
+            flags.put("sharpDayDrop", false);
+            Map<String, Object> out = new LinkedHashMap<>();
+            out.put("bullets", bullets);
+            out.put("flags", flags);
+            return out;
+        }
 
         if (!(wMax > 0) || !(wMedian > 0) || nPoints < 2) {
             flags.put("possibleInflatedAnchor", false);
@@ -115,6 +134,30 @@ public final class HotSaleNarrative {
             double wMedian,
             double maxDodDropPct,
             int nPoints) {
-        return build(firstMin, lastMin, wMax, wMedian, maxDodDropPct, nPoints, null, null, null);
+        return build(firstMin, lastMin, wMax, wMedian, maxDodDropPct, nPoints, null, null, null, true);
+    }
+
+    /** Compat API: ancla tratada como vigente. */
+    public static Map<String, Object> build(
+            double firstMin,
+            double lastMin,
+            double wMax,
+            double wMedian,
+            double maxDodDropPct,
+            int nPoints,
+            Double marketFirstMin,
+            Double marketLastMin,
+            Double marketTrendPct) {
+        return build(
+                firstMin,
+                lastMin,
+                wMax,
+                wMedian,
+                maxDodDropPct,
+                nPoints,
+                marketFirstMin,
+                marketLastMin,
+                marketTrendPct,
+                true);
     }
 }
